@@ -1,0 +1,11 @@
+{
+  "name": "memento-front",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Живое дерево: ветки растут на глазах, листья включаются и выключаются",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "test": "node --test test/"
+  }
+}
