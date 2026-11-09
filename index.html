@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Живое дерево</title>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <canvas id="scene" aria-label="Дерево"></canvas>
+  <div id="tooltip" class="tooltip" hidden></div>
+
+  <button id="panel-toggle" class="panel-toggle" type="button" aria-controls="panel" aria-expanded="true">Ветки</button>
+
+  <aside id="panel" class="panel">
+    <header class="panel__head">
+      <h1>Живое дерево</h1>
+      <p class="muted">Кликните по ветке, чтобы выбрать её, и добавьте к ней новую.</p>
+    </header>
+
+    <section class="panel__section switches">
+      <label class="switch"><input id="leaves-toggle" type="checkbox" checked><span></span>Листья</label>
+      <label class="switch"><input id="labels-toggle" type="checkbox"><span></span>Подписи</label>
+      <label class="switch"><input id="wind-toggle" type="checkbox" checked><span></span>Ветер</label>
+    </section>
+
+    <section class="panel__section">
+      <h2>Выбрана ветка</h2>
+      <form id="rename-form" class="row">
+        <input id="rename-input" type="text" maxlength="60" aria-label="Название ветки">
+        <button type="submit" class="ghost" title="Переименовать">Сохранить</button>
+      </form>
+      <form id="add-form" class="row">
+        <input id="add-input" type="text" maxlength="60" placeholder="Название новой ветки" aria-label="Название новой ветки">
+        <button type="submit" class="primary">Добавить</button>
+      </form>
+      <div class="row row--split">
+        <button id="remove-btn" type="button" class="danger">Удалить ветку</button>
+        <span id="stats" class="muted"></span>
+      </div>
+    </section>
+
+    <section class="panel__section panel__section--grow">
+      <h2>Все ветки</h2>
+      <ul id="branch-list" class="branch-list"></ul>
+    </section>
+
+    <details class="panel__section">
+      <summary>Задать структуру текстом</summary>
+      <p class="muted">Одна строка — одна ветка, вложенность — отступом в два пробела. Первая строка — ствол.</p>
+      <textarea id="outline" rows="9" spellcheck="false"></textarea>
+      <div class="row">
+        <button id="outline-apply" type="button" class="primary">Вырастить</button>
+        <button id="outline-export" type="button" class="ghost">Взять текущую</button>
+      </div>
+      <p id="outline-error" class="error" hidden></p>
+    </details>
+
+    <footer class="row panel__foot">
+      <button id="replay-btn" type="button" class="ghost">Вырастить заново</button>
+      <button id="reset-btn" type="button" class="ghost">Пример</button>
+    </footer>
+  </aside>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
