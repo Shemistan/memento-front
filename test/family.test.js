@@ -29,6 +29,10 @@ import {
   toFamilyText,
   toTree,
   unionsOf,
+  bloodDistances,
+  editAsSeen,
+  mainRoot,
+  viewFrom,
 } from '../src/family/model.js';
 import { GAP, MIN_DY, familyLayout } from '../src/flat/family-layout.js';
 
@@ -315,4 +319,70 @@ test('фото человека переживает сохранение', () =
   const p = addPerson(fam, { name: 'А' });
   setPhoto(fam, p.id, 'ph123');
   assert.equal(deserialize(serialize(fam)).people[0].photo, 'ph123');
+});
+
+const SIDES = `Дед 1920
+  Папа 1950
+    + @Мама 1952 (1975)
+      Я 1977
+Бабушка 1925
+  Мама 1952
+  Тётя 1955`;
+
+test('главное дерево — у того, кто ближе смотрящему по крови', () => {
+  const fam = parseFamily(SIDES);
+  const id = (name) => fam.people.find((p) => p.name === name).id;
+  const [union] = fam.unions;
+  assert.equal(union.host, id('Папа'));
+
+  const aunt = viewFrom(fam, id('Тётя'));
+  assert.equal(aunt.unions[0].host, id('Мама'), 'родня мамы: пара на мамином дереве');
+  assert.equal(aunt.unions[0].partner, id('Папа'), 'лиана — от папы');
+  assert.equal(mainRoot(aunt).name, 'Бабушка');
+  assert.ok(toTree(aunt).nodes.some((n) => n.name === 'Я'), 'дети пары растут на мамином дереве');
+  assert.equal(union.host, id('Папа'), 'хранимая семья не меняется');
+
+  assert.equal(viewFrom(fam, id('Дед')).unions[0].host, id('Папа'));
+  assert.equal(viewFrom(fam, id('Я')).unions[0].host, id('Папа'), 'обе стороны одинаково близки — как записано');
+  assert.equal(mainRoot(viewFrom(fam, null)).name, 'Дед');
+  assert.equal(viewFrom(fam, 'p999').viewer, null, 'неизвестный смотрящий — как записано');
+  assert.equal(viewFrom(fam, id('Мама')).unions[0].host, id('Мама'), 'сам супруг — ближе всех');
+
+  const layout = familyLayout(aunt);
+  assert.equal(layout.nodes.get(id('Я')).parentId, union.id);
+  assert.equal(layout.nodes.get(union.id).parentId, id('Мама'));
+});
+
+test('правки «как видно»: ветки по смотрящему, пары возвращаются к записанному', () => {
+  const fam = parseFamily(SIDES);
+  const id = (name) => fam.people.find((p) => p.name === name).id;
+  const [union] = fam.unions;
+
+  editAsSeen(fam, id('Тётя'), (f) => addPerson(f, { name: 'Сестра', parent: union.id }));
+  assert.equal(fam.unions[0].host, id('Папа'), 'после правки пара снова как записано');
+  assert.equal(childrenOf(fam, union.id).length, 2);
+
+  assert.throws(() => editAsSeen(fam, id('Тётя'), (f) => setBorn(f, id('Я'), '31.02.1977')), /Не похоже на дату/);
+  assert.equal(getPerson(fam, id('Я')).born, 1977, 'ошибка — семья не тронута');
+
+  const asAunt = structuredClone(fam);
+  editAsSeen(asAunt, id('Тётя'), (f) => removePerson(f, id('Мама')));
+  assert.ok(!asAunt.people.some((p) => p.name === 'Я'), 'для родни мамы дети — на её ветке');
+
+  const asWritten = structuredClone(fam);
+  editAsSeen(asWritten, null, (f) => removePerson(f, id('Мама')));
+  assert.equal(getPerson(asWritten, id('Я')).parent, id('Папа'), 'как записано — дети остаются у папы');
+
+  editAsSeen(fam, id('Тётя'), (f) => removeUnion(f, union.id));
+  assert.equal(getPerson(fam, id('Я')).parent, id('Мама'), 'разрыв пары: дети у видимого host');
+});
+
+test('расстояния по крови идут через обоих родителей пары', () => {
+  const fam = parseFamily(SIDES);
+  const id = (name) => fam.people.find((p) => p.name === name).id;
+  const dist = bloodDistances(fam, id('Тётя'));
+  assert.equal(dist.get(id('Мама')), 2);
+  assert.equal(dist.get(id('Я')), 3);
+  assert.equal(dist.get(id('Папа')), 4);
+  assert.equal(dist.get(id('Дед')), 5);
 });

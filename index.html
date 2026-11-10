@@ -33,6 +33,11 @@
       <label><input type="radio" name="view" value="editor"><span>Редактор</span></label>
     </div>
 
+    <label class="row viewer-row" title="Главным станет дерево этого человека, лианы потянутся от супругов из других семей">
+      <span class="muted">Кто смотрит</span>
+      <select id="viewer"></select>
+    </label>
+
     <section class="panel__section switches">
       <label class="switch"><input id="leaves-toggle" type="checkbox" checked><span></span>Листья</label>
       <label class="switch" data-view="living"><input id="labels-toggle" type="checkbox"><span></span>Подписи</label>
@@ -102,6 +107,7 @@
       </details>
       <div class="row row--split">
         <button id="parent-btn" type="button" class="ghost">↑ Родитель</button>
+        <button id="viewer-btn" type="button" class="ghost" title="Смотреть на семью глазами этого человека">Это я</button>
         <button id="remove-btn" type="button" class="danger">Удалить</button>
         <span id="stats" class="muted"></span>
       </div>
@@ -126,6 +132,34 @@
         <button id="outline-export" type="button" class="ghost">Взять текущую</button>
       </div>
       <p id="outline-error" class="error" hidden></p>
+    </details>
+
+    <details id="admin-box" class="panel__section admin-box" hidden>
+      <summary>Админка</summary>
+      <p id="sync-note" class="muted"></p>
+      <div class="row"><button id="pull-btn" type="button" class="ghost">Взять опубликованную</button></div>
+      <form id="login-form">
+        <p class="muted">Публиковать семью для всех и работать с файлом семьи могут только администраторы.</p>
+        <div class="row">
+          <input id="login-name" type="text" autocomplete="username" placeholder="Логин" aria-label="Логин" required>
+          <input id="login-password" type="password" autocomplete="current-password" placeholder="Пароль" aria-label="Пароль" required>
+        </div>
+        <div class="row"><button type="submit" class="primary">Войти</button></div>
+      </form>
+      <div id="admin-tools" hidden>
+        <p class="muted">Вы вошли как <b id="admin-name"></b>.</p>
+        <div class="row">
+          <button id="publish-btn" type="button" class="primary">Опубликовать для всех</button>
+        </div>
+        <div class="row">
+          <button id="export-btn" type="button" class="ghost">Скачать файл</button>
+          <label class="ghost file-btn">Загрузить файл<input id="import-input" type="file" accept=".json,application/json"></label>
+          <button id="logout-btn" type="button" class="ghost">Выйти</button>
+        </div>
+        <p class="muted hint">Файл — вся семья с фото. Загруженный файл виден только вам, пока вы его не опубликуете.</p>
+      </div>
+      <p id="admin-status" class="muted" hidden></p>
+      <p id="admin-error" class="error" hidden></p>
     </details>
 
     <footer class="row panel__foot">

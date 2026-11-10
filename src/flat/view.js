@@ -160,6 +160,7 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
     item.leaves.classList.toggle('is-gone', person.dead);
     item.decorLeaves.classList.toggle('is-gone', person.dead);
     item.node.classList.toggle('is-gone', person.dead);
+    item.node.classList.toggle('is-viewer', fam.viewer === person.id);
     if (item.tip === tip && item.leafWidth === n.width) return;
     item.tip = tip;
     item.leafWidth = n.width;

@@ -195,6 +195,7 @@ export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => nul
     fillFrom(card.querySelector('[data-field="parent"]'), person);
     setValue(card.querySelector('[data-field="dead"]'), person.dead);
     card.classList.toggle('is-gone', person.dead);
+    card.classList.toggle('is-viewer', fam.viewer === person.id);
     const up = card.querySelector('[data-act="parent"]');
     up.hidden = !canAddParent(fam, person.id);
     up.title = person.parent === null ? 'Добавить родителя' : 'Добавить второго родителя';

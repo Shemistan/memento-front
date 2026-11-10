@@ -104,6 +104,76 @@ export function rootOf(fam, personId) {
   return person;
 }
 
+// --- кто смотрит ---
+// Главное дерево зависит от того, кто смотрит: в каждой паре ветку с детьми
+// держит тот из супругов, кто ближе смотрящему по крови, лиана тянется от
+// другого. Родня папы видит главным его дерево, родня мамы — её.
+
+// Расстояние по крови от человека до всех родных: шаг — родитель или ребёнок.
+export function bloodDistances(fam, fromId) {
+  const near = new Map(fam.people.map((p) => [p.id, []]));
+  for (const child of fam.people) {
+    const union = isUnionId(child.parent) ? getUnion(fam, child.parent) : null;
+    const elders = union ? [union.host, union.partner] : child.parent === null ? [] : [child.parent];
+    for (const elder of elders) {
+      if (!near.has(elder)) continue;
+      near.get(elder).push(child.id);
+      near.get(child.id).push(elder);
+    }
+  }
+  const dist = new Map();
+  if (!near.has(fromId)) return dist;
+  dist.set(fromId, 0);
+  const queue = [fromId];
+  for (let i = 0; i < queue.length; i++) {
+    for (const next of near.get(queue[i])) {
+      if (dist.has(next)) continue;
+      dist.set(next, dist.get(queue[i]) + 1);
+      queue.push(next);
+    }
+  }
+  return dist;
+}
+
+// Семья глазами viewerId: копия, где пары развёрнуты к смотрящему. Хранимая
+// семья не меняется. Без смотрящего (или если он не найден) — как записано.
+export function viewFrom(fam, viewerId) {
+  if (!viewerId || !getPerson(fam, viewerId)) return { ...fam, viewer: null };
+  const dist = bloodDistances(fam, viewerId);
+  const far = (id) => dist.get(id) ?? Infinity;
+  const seen = { ...fam, unions: [...fam.unions], viewer: viewerId };
+  seen.unions.forEach((u, i) => {
+    if (far(u.partner) >= far(u.host)) return;
+    const flipped = { ...u, host: u.partner, partner: u.host };
+    // Разворот не должен сделать ребёнка пары предком нового host (запутанные данные).
+    const kids = new Set(childrenOf(seen, u.id).map((p) => p.id));
+    for (let up = flipped.host, guard = new Set(); up && !guard.has(up); up = carrierOf(seen, getPerson(seen, up)?.parent ?? null)) {
+      if (kids.has(up)) return;
+      guard.add(up);
+    }
+    seen.unions[i] = flipped;
+  });
+  return seen;
+}
+
+// Правка «как видно»: change получает семью глазами viewerId (удаление ветки,
+// разрыв пары работают по видимым веткам), потом пары возвращаются к
+// записанному виду. Если change бросил ошибку, семья не меняется.
+export function editAsSeen(fam, viewerId, change) {
+  const seen = structuredClone(viewFrom(fam, viewerId));
+  const result = change(seen);
+  const stored = new Map(fam.unions.map((u) => [u.id, u]));
+  fam.seq = seen.seq;
+  fam.people = seen.people;
+  fam.unions = seen.unions.map((u) => (stored.has(u.id) ? { ...u, host: stored.get(u.id).host, partner: stored.get(u.id).partner } : u));
+  return result;
+}
+
+// Корень главного дерева: дерево смотрящего, без него — первое.
+export function mainRoot(fam) {
+  return (fam.viewer && rootOf(fam, fam.viewer)) || roots(fam)[0] || null;
+}
+
 export function addPerson(fam, { name, born = null, died = null, dead = false, parent = null, added = 0, before = null } = {}) {
   if (parent !== null && !(isUnionId(parent) ? getUnion(fam, parent) : getPerson(fam, parent))) {
     throw new Error(`Нет родителя ${parent}`);
@@ -458,10 +528,10 @@ export function fromTree(tree) {
   return fam;
 }
 
-// Проекция главного дерева (первого корня) для живого вида: дети пар —
-// ветки от host. ids узлов = ids людей, корень — ROOT_ID.
+// Проекция главного дерева (mainRoot) для живого вида: дети пар — ветки от
+// host. ids узлов = ids людей, корень — ROOT_ID.
 export function toTree(fam) {
-  const main = roots(fam)[0];
+  const main = mainRoot(fam);
   const nodes = [];
   if (!main) return { seq: 0, nodes: [{ id: ROOT_ID, name: '—', parentId: null, born: 0 }] };
   const nodeId = (pid) => (pid === main.id ? ROOT_ID : pid);
@@ -476,4 +546,4 @@ export function toTree(fam) {
   return { seq: fam.seq, nodes };
 }
 
-export const personIdFromTree = (fam, nodeId) => (nodeId === ROOT_ID ? roots(fam)[0]?.id ?? null : nodeId);
+export const personIdFromTree = (fam, nodeId) => (nodeId === ROOT_ID ? mainRoot(fam)?.id ?? null : nodeId);
