@@ -117,29 +117,111 @@ function cubic(p0, p1, p2, p3, t) {
   };
 }
 
-// Сужающаяся ветка от родителя к ребёнку: S-образная кривая (вверх, вбок,
-// снова вверх), обведённая с толщиной r0 → r1. Возвращает атрибут d.
-export function branchPath(from, to, r0, r1, { bend = 0.5, steps = 14 } = {}) {
+// Кривая ветки от родителя к ребёнку: S-образная (вверх, вбок, снова вверх).
+// Нужна и для контура, и чтобы сажать на ветку декоративные веточки.
+export function branchCurve(from, to, bend = 0.5) {
   const dy = to.y - from.y;
   const p1 = { x: from.x, y: from.y + dy * bend };
   const p2 = { x: to.x, y: to.y - dy * (1 - bend) * 0.9 };
-  const pts = [];
-  for (let i = 0; i <= steps; i++) pts.push(cubic(from, p1, p2, to, i / steps));
+  return (t) => cubic(from, p1, p2, to, t);
+}
+
+// Направление кривой в точке t (радианы, как Math.atan2).
+export function curveAngle(at, t) {
+  const a = at(Math.max(0, t - 0.01));
+  const b = at(Math.min(1, t + 0.01));
+  return Math.atan2(b.y - a.y, b.x - a.x);
+}
+
+// Обводит ломаную толщиной radius(t) и возвращает атрибут d.
+function outline(pts, radius) {
   const left = [];
   const right = [];
+  const last = pts.length - 1;
   pts.forEach((p, i) => {
     const a = pts[Math.max(0, i - 1)];
-    const b = pts[Math.min(pts.length - 1, i + 1)];
+    const b = pts[Math.min(last, i + 1)];
     const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
     const nx = -(b.y - a.y) / len;
     const ny = (b.x - a.x) / len;
-    const t = i / steps;
-    // Утолщение у основания — как наплыв в развилке настоящей ветки.
-    const r = r1 + (r0 - r1) * (1 - t) ** 1.4 + r0 * 0.35 * Math.max(0, 1 - t * 6);
+    const r = radius(i / last);
     left.push(`${fmt(p.x + nx * r)} ${fmt(p.y + ny * r)}`);
     right.push(`${fmt(p.x - nx * r)} ${fmt(p.y - ny * r)}`);
   });
   return `M${left.join('L')}L${right.reverse().join('L')}Z`;
+}
+
+// Сужающаяся ветка с толщиной r0 → r1 и наплывом у развилки.
+export function branchPath(from, to, r0, r1, { bend = 0.5, steps = 14 } = {}) {
+  const at = branchCurve(from, to, bend);
+  const pts = [];
+  for (let i = 0; i <= steps; i++) pts.push(at(i / steps));
+  return outline(pts, (t) => r1 + (r0 - r1) * (1 - t) ** 1.4 + r0 * 0.35 * Math.max(0, 1 - t * 6));
+}
+
+// Декоративная веточка: прямая с лёгким изгибом кверху, сужается к кончику.
+// Возвращает контур, кончик и направление на кончике — для подветочек и листьев.
+export function twigPath(start, angle, length, r0, steps = 6) {
+  const dir = { x: Math.cos(angle), y: Math.sin(angle) };
+  const end = { x: start.x + dir.x * length, y: start.y + dir.y * length };
+  const ctrl = { x: start.x + dir.x * length * 0.5, y: start.y + dir.y * length * 0.5 - length * 0.12 };
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const u = 1 - t;
+    pts.push({ x: u * u * start.x + 2 * u * t * ctrl.x + t * t * end.x, y: u * u * start.y + 2 * u * t * ctrl.y + t * t * end.y });
+  }
+  return {
+    d: outline(pts, (t) => r0 * (1 - 0.72 * t)),
+    tip: end,
+    angle: Math.atan2(end.y - ctrl.y, end.x - ctrl.x),
+  };
+}
+
+const range = (rand, a, b) => a + (b - a) * rand();
+
+// Веточки, которых нет в модели: они дают кроне вид настоящего дерева.
+// Угол — от направления родительской ветки в точке t, длина — доля яруса.
+// Детерминированно по id, чтобы правки не перетасовывали крону.
+export function twigSpecs(id, { tip = false } = {}) {
+  const rand = rng(hashString(`flat-twig:${id}`));
+  const twig = (t, side, angle, len) => ({
+    t,
+    angle: side * angle,
+    len,
+    kids: rand() < 0.7 ? [{ t: range(rand, 0.45, 0.7), angle: -side * range(rand, 28, 45), len: range(rand, 0.4, 0.6) }] : [],
+  });
+  const twigs = [];
+  let side = rand() < 0.5 ? -1 : 1;
+  for (let i = 0; i < 3; i++) {
+    twigs.push(twig(0.2 + i * 0.25 + range(rand, 0, 0.1), side, range(rand, 30, 55), range(rand, 0.32, 0.52)));
+    side = -side;
+  }
+  if (tip) {
+    // Крона над кончиком: веером в стороны, прямо вверх не растём — там подпись.
+    for (const base of [-1, 1]) twigs.push(twig(1, base, range(rand, 22, 40), range(rand, 0.32, 0.45)));
+    if (rand() < 0.6) twigs.push(twig(1, rand() < 0.5 ? -1 : 1, range(rand, 55, 70), range(rand, 0.25, 0.35)));
+  }
+  return twigs;
+}
+
+// Пучок листьев на кончике веточки. Координаты локальные: веточка смотрит вверх (−y).
+export function twigLeaves(seed) {
+  const rand = rng(hashString(`flat-twig-leaf:${seed}`));
+  const count = 4 + Math.floor(rand() * 4);
+  const spots = [];
+  for (let i = 0; i < count; i++) {
+    const angle = range(rand, -70, 70);
+    spots.push({
+      x: range(rand, -7, 7),
+      y: range(rand, -10, 3),
+      angle,
+      size: range(rand, 9, 14),
+      tone: Math.floor(rand() * 4),
+      delay: Math.round(rand() * 420),
+    });
+  }
+  return spots;
 }
 
 // Ствол от земли до корневой таблички с расширением у земли и корнями.
