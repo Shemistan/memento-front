@@ -15,23 +15,25 @@ import {
   removeUnion,
   renamePerson,
   setBorn,
+  formatDate,
+  parentOptions,
   setDied,
+  setParent,
   setSince,
   unionsOf,
 } from '../family/model.js';
 import { familyLayout } from '../flat/family-layout.js';
 import { vineColor } from '../flat/view.js';
 
-export const CARD_W = 228;
-export const CARD_H = 104;
-const UNION_W = 168;
+export const CARD_W = 264;
+export const CARD_H = 108;
+const UNION_W = 184;
 const UNION_H = 32;
 const ROWS = 84; // ярус: человек → пара → дети
 const BESIDE_GAP = 20; // между человеком и его супругом «со стороны»
 const PAD = 48;
 const NS = 'http://www.w3.org/2000/svg';
 
-const yearValue = (input) => (input.value.trim() === '' ? null : Number(input.value));
 
 function html(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -43,15 +45,24 @@ function html(tag, attrs = {}, children = []) {
   return node;
 }
 
+const DATE_HINT = 'Год или дд.мм.гггг';
+
 function personCard(id) {
   return html('article', { class: 'ecard', 'data-id': id }, [
     html('button', { type: 'button', class: 'ecard__up', 'data-act': 'parent', title: 'Добавить родителя', 'aria-label': 'Добавить родителя', text: '+' }),
+    // Чей ребёнок: одного родителя или пары. Видно, когда есть выбор.
+    html('select', { class: 'ecard__from', 'data-field': 'parent', title: 'Чей ребёнок', 'aria-label': 'Чей ребёнок', hidden: '' }),
+    html('label', { class: 'ecard__photo', title: 'Фото: нажмите или перетащите картинку на карточку' }, [
+      html('img', { alt: '', hidden: '' }),
+      html('span', { class: 'ecard__initials', 'aria-hidden': 'true' }),
+      html('input', { type: 'file', accept: 'image/*', 'data-photo': '', 'aria-label': 'Загрузить фото' }),
+    ]),
     html('input', { class: 'ecard__name', 'data-field': 'name', maxlength: '60', 'aria-label': 'Имя' }),
     html('div', { class: 'ecard__life' }, [
-      html('input', { 'data-field': 'born', type: 'number', min: '1', max: '2999', placeholder: 'рожд.', 'aria-label': 'Год рождения' }),
+      html('input', { 'data-field': 'born', inputmode: 'numeric', placeholder: 'рождение', title: DATE_HINT, 'aria-label': 'Дата рождения' }),
       html('span', { class: 'ecard__dash', text: '–' }),
-      html('input', { 'data-field': 'died', type: 'number', min: '1', max: '2999', placeholder: 'смерть', 'aria-label': 'Год смерти' }),
-      html('label', { class: 'ecard__dead', title: 'Нет в живых (год может быть неизвестен)' }, [
+      html('input', { 'data-field': 'died', inputmode: 'numeric', placeholder: 'смерть', title: DATE_HINT, 'aria-label': 'Дата смерти' }),
+      html('label', { class: 'ecard__dead', title: 'Нет в живых (дата может быть неизвестна)' }, [
         html('input', { type: 'checkbox', 'data-field': 'dead' }),
         html('span', { text: '†' }),
       ]),
@@ -68,12 +79,20 @@ function personCard(id) {
 function unionCard(id) {
   return html('div', { class: 'eunion', 'data-id': id }, [
     html('span', { class: 'eunion__rings', 'aria-hidden': 'true', text: '⚭' }),
-    html('input', { 'data-field': 'since', type: 'number', min: '1', max: '2999', placeholder: 'год брака', 'aria-label': 'Год брака' }),
+    html('input', { 'data-field': 'since', inputmode: 'numeric', placeholder: 'дата брака', title: DATE_HINT, 'aria-label': 'Дата брака' }),
     html('button', { type: 'button', 'data-act': 'child', title: 'Ребёнок пары', 'aria-label': 'Ребёнок пары', text: '↓' }),
     html('button', { type: 'button', class: 'ecard__remove', 'data-act': 'remove', title: 'Разорвать пару', 'aria-label': 'Разорвать пару', text: '✕' }),
     html('span', { class: 'ecard__warn', text: '!', hidden: '' }),
   ]);
 }
+
+const initials = (name) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join('');
 
 // Значение в поле не трогаем, пока человек в нём печатает.
 function setValue(input, value) {
@@ -82,7 +101,9 @@ function setValue(input, value) {
   else input.value = value ?? '';
 }
 
-export function createEditor(root, { act, onSelect }) {
+// act(change) — применить правку к семье; onPhoto(id, file) — загрузить фото;
+// photoOf(person) — адрес загруженного портрета или null.
+export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => null }) {
   const world = html('div', { class: 'editor-world' });
   const links = document.createElementNS(NS, 'svg');
   links.setAttribute('class', 'editor-links');
@@ -164,8 +185,14 @@ export function createEditor(root, { act, onSelect }) {
 
   function fillPerson(card, person) {
     setValue(card.querySelector('[data-field="name"]'), person.name);
-    setValue(card.querySelector('[data-field="born"]'), person.born);
-    setValue(card.querySelector('[data-field="died"]'), person.died);
+    setValue(card.querySelector('[data-field="born"]'), formatDate(person.born, person.bornDate));
+    setValue(card.querySelector('[data-field="died"]'), formatDate(person.died, person.diedDate));
+    const url = photoOf(person);
+    const img = card.querySelector('.ecard__photo img');
+    img.hidden = !url;
+    if (url && img.getAttribute('src') !== url) img.setAttribute('src', url);
+    card.querySelector('.ecard__initials').textContent = url ? '' : initials(person.name);
+    fillFrom(card.querySelector('[data-field="parent"]'), person);
     setValue(card.querySelector('[data-field="dead"]'), person.dead);
     card.classList.toggle('is-gone', person.dead);
     const up = card.querySelector('[data-act="parent"]');
@@ -176,11 +203,30 @@ export function createEditor(root, { act, onSelect }) {
 
   function fillUnion(card, union) {
     card.style.setProperty('--vine', vineColor(fam, union.id));
-    setValue(card.querySelector('[data-field="since"]'), union.since);
+    setValue(card.querySelector('[data-field="since"]'), formatDate(union.since, union.sinceDate));
     const host = getPerson(fam, union.host);
     const partner = getPerson(fam, union.partner);
     card.title = `${host.name} + ${partner.name}`;
     card.setAttribute('aria-label', `Пара: ${host.name} и ${partner.name}`);
+  }
+
+  // Выбор «чей ребёнок»: сам родитель или любая его пара.
+  function fillFrom(select, person) {
+    const options = parentOptions(fam, person.id);
+    select.hidden = options.length < 2;
+    if (select.hidden) return;
+    const label = (id) => {
+      if (!isUnionId(id)) return `от: ${getPerson(fam, id).name}`;
+      const union = getUnion(fam, id);
+      const since = union.since === null ? '' : ` (${formatDate(union.since, union.sinceDate)})`;
+      return `от: ${getPerson(fam, union.host).name} + ${getPerson(fam, union.partner).name}${since}`;
+    };
+    const signature = options.map(label).join('|');
+    if (select.dataset.signature !== signature) {
+      select.replaceChildren(...options.map((id) => new Option(label(id), id)));
+      select.dataset.signature = signature;
+    }
+    select.value = person.parent;
   }
 
   // Связи уступом: человек → его пары (каждая — от самого человека, а не от
@@ -284,19 +330,57 @@ export function createEditor(root, { act, onSelect }) {
   });
 
   root.addEventListener('change', (e) => {
-    const input = e.target.closest('[data-field]');
     const card = e.target.closest('[data-id]');
-    if (!input || !card) return;
+    if (!card) return;
     const id = card.dataset.id;
+    if (e.target.matches('[data-photo]')) {
+      const [file] = e.target.files;
+      e.target.value = '';
+      if (file) onPhoto(id, file);
+      return;
+    }
+    const input = e.target.closest('[data-field]');
+    if (!input) return;
     const field = input.dataset.field;
-    act((f) => {
-      if (field === 'name') renamePerson(f, id, input.value);
-      if (field === 'born') setBorn(f, id, yearValue(input));
-      if (field === 'since') setSince(f, id, yearValue(input));
-      if (field === 'died') setDied(f, id, { dead: getPerson(f, id).dead, died: yearValue(input) });
-      // Сняли «†» — человек жив, год смерти стирается.
-      if (field === 'dead') setDied(f, id, { dead: input.checked, died: input.checked ? getPerson(f, id).died : null });
-    });
+    const value = input.value;
+    try {
+      act((f) => {
+        const person = getPerson(f, id);
+        if (field === 'name') renamePerson(f, id, value);
+        if (field === 'born') setBorn(f, id, value);
+        if (field === 'since') setSince(f, id, value);
+        if (field === 'parent') setParent(f, id, value);
+        if (field === 'died') setDied(f, id, { dead: person.dead, died: value });
+        // Сняли «†» — человек жив, дата смерти стирается.
+        if (field === 'dead') setDied(f, id, { dead: input.checked, died: input.checked ? person.diedDate ?? person.died : null });
+      });
+      input.classList.remove('is-invalid');
+      input.removeAttribute('aria-invalid');
+      if (input.dataset.hint) input.title = input.dataset.hint;
+    } catch (err) {
+      // Непонятная дата: поле подсвечено, модель не тронута, текст остаётся для правки.
+      input.classList.add('is-invalid');
+      input.setAttribute('aria-invalid', 'true');
+      input.dataset.hint ??= input.title;
+      input.title = err.message;
+    }
+  });
+
+  // Фото можно перетащить прямо на карточку.
+  root.addEventListener('dragover', (e) => {
+    const card = e.target.closest('.ecard');
+    if (!card || ![...(e.dataTransfer?.types ?? [])].includes('Files')) return;
+    e.preventDefault();
+    card.classList.add('is-drop');
+  });
+  root.addEventListener('dragleave', (e) => e.target.closest('.ecard')?.classList.remove('is-drop'));
+  root.addEventListener('drop', (e) => {
+    const card = e.target.closest('.ecard');
+    if (!card) return;
+    e.preventDefault();
+    card.classList.remove('is-drop');
+    const [file] = e.dataTransfer.files;
+    if (file) onPhoto(card.dataset.id, file);
   });
 
   // Enter — сохранить поле.

@@ -18,8 +18,12 @@ import {
   renamePerson,
   roots,
   serialize,
+  formatDate,
+  parentOptions,
   setBorn,
   setDied,
+  setParent,
+  setPhoto,
   setSince,
   toFamilyText,
   toTree,
@@ -29,6 +33,7 @@ import { buildPlan, carryOver, pose } from './layout.js';
 import { createRenderer } from './render.js';
 import { createFlatView } from './flat/view.js';
 import { createEditor } from './editor/view.js';
+import { cachedPhoto, deletePhoto, loadPhoto, portraitFrom, prunePhotos, savePhoto } from './family/photos.js';
 
 const STORAGE_KEY = 'memento-family:v1';
 const LEGACY_KEY = 'memento-tree:v1';
@@ -74,6 +79,13 @@ const els = {
   personForm: $('person-form'),
   personName: $('person-name'),
   personBorn: $('person-born'),
+  personPhoto: $('person-photo'),
+  personInitials: $('person-initials'),
+  photoInputs: [$('photo-input'), $('photo-input-2')],
+  photoRemove: $('photo-remove'),
+  fromRow: $('from-row'),
+  personFrom: $('person-from'),
+  selError: $('sel-error'),
   unionBox: $('union-box'),
   unionNames: $('union-names'),
   unionForm: $('union-form'),
@@ -112,8 +124,47 @@ let hoverId = null;
 let leafAmount = state.leaves ? 1 : 0;
 let windAmount = state.wind ? 1 : 0;
 const renderer = createRenderer(els.canvas);
-const flat = createFlatView(els.flat, { onSelect: select });
-const editor = createEditor(els.editor, { act: editorAct, onSelect: select });
+const photoOf = (person) => cachedPhoto(person.photo);
+const flat = createFlatView(els.flat, { onSelect: select, photoOf });
+const editor = createEditor(els.editor, { act: editorAct, onSelect: select, onPhoto: uploadPhoto, photoOf });
+
+// Фото: сжать до портрета, положить в хранилище, старое удалить.
+async function uploadPhoto(id, file) {
+  try {
+    const photoId = await savePhoto(await portraitFrom(file));
+    const old = getPerson(state.fam, id)?.photo;
+    setPhoto(state.fam, id, photoId);
+    familyChanged();
+    if (old) deletePhoto(old).catch(() => {});
+    showError('');
+  } catch (err) {
+    showError(`Фото не загрузилось: ${err.message}`);
+  }
+}
+
+function removePhoto(id) {
+  const old = getPerson(state.fam, id)?.photo;
+  setPhoto(state.fam, id, null);
+  familyChanged();
+  if (old) deletePhoto(old).catch(() => {});
+}
+
+// Портреты грузятся из хранилища после старта; лишние (удалённых людей) — стираем.
+async function loadPhotos({ prune = false } = {}) {
+  const ids = new Set(state.fam.people.map((p) => p.photo).filter(Boolean));
+  try {
+    await Promise.all([...ids].map(loadPhoto));
+    if (prune) await prunePhotos(ids);
+  } catch {
+    // Хранилище фото недоступно — дерево работает без портретов.
+  }
+  if (ids.size) familyChanged();
+}
+
+function showError(message) {
+  els.selError.textContent = message;
+  els.selError.hidden = !message;
+}
 
 // Правка из редактора: изменить семью и показать результат во всех видах.
 function editorAct(change) {
@@ -214,7 +265,7 @@ function livingSelected() {
   return id === roots(state.fam)[0]?.id ? ROOT_ID : id;
 }
 
-const yearValue = (input) => (input.value.trim() === '' ? null : Number(input.value));
+const dateValue = (input) => input.value.trim();
 const yearText = (year) => (year === null ? '' : ` · ${year}`);
 
 function renderPanel() {
@@ -233,8 +284,14 @@ function renderPanel() {
   els.pairBox.hidden = !person;
   if (person) {
     els.personName.value = person.name;
-    els.personBorn.value = person.born ?? '';
-    els.personDied.value = person.died ?? '';
+    els.personBorn.value = formatDate(person.born, person.bornDate);
+    els.personDied.value = formatDate(person.died, person.diedDate);
+    const url = photoOf(person);
+    els.personPhoto.hidden = !url;
+    if (url) els.personPhoto.src = url;
+    els.personInitials.textContent = url ? '' : person.name.slice(0, 1).toUpperCase();
+    els.photoRemove.hidden = !person.photo;
+    renderFrom(person);
     els.personDead.checked = person.dead;
     els.parentBtn.hidden = !canAddParent(fam, person.id);
     els.childName.placeholder = `Ребёнок: ${person.name}`;
@@ -249,7 +306,7 @@ function renderPanel() {
     const host = getPerson(fam, union.host);
     const partner = getPerson(fam, union.partner);
     els.unionNames.textContent = `${host.name} + ${partner.name}`;
-    els.unionSince.value = union.since ?? '';
+    els.unionSince.value = formatDate(union.since, union.sinceDate);
     els.childName.placeholder = `Ребёнок: ${host.name} и ${partner.name}`;
     els.childHint.textContent = '';
     els.remove.textContent = 'Разорвать пару';
@@ -278,6 +335,21 @@ function renderPartners(person) {
   els.pairPartner.replaceChildren(...options);
   els.pairPartner.value = options.some((o) => o.value === current) ? current : '';
   els.pairNew.hidden = els.pairPartner.value !== '';
+}
+
+function renderFrom(person) {
+  const options = parentOptions(state.fam, person.id);
+  els.fromRow.hidden = options.length < 2;
+  if (els.fromRow.hidden) return;
+  els.personFrom.replaceChildren(
+    ...options.map((id) => {
+      if (!isUnionId(id)) return new Option(getPerson(state.fam, id).name, id);
+      const union = getUnion(state.fam, id);
+      const since = union.since === null ? '' : ` (${formatDate(union.since, union.sinceDate)})`;
+      return new Option(`${getPerson(state.fam, union.host).name} + ${getPerson(state.fam, union.partner).name}${since}`, id);
+    }),
+  );
+  els.personFrom.value = person.parent;
 }
 
 function listButton(id, text, extra = '') {
@@ -331,26 +403,44 @@ els.list.addEventListener('click', (e) => {
 
 els.personForm.addEventListener('submit', (e) => {
   e.preventDefault();
+  // Сначала проверяем обе даты, чтобы не сохранить половину правки.
+  try {
+    const probe = structuredClone(state.fam);
+    setBorn(probe, state.selectedId, dateValue(els.personBorn));
+    setDied(probe, state.selectedId, { dead: els.personDead.checked, died: dateValue(els.personDied) });
+  } catch (err) {
+    showError(err.message);
+    return;
+  }
   renamePerson(state.fam, state.selectedId, els.personName.value);
-  setBorn(state.fam, state.selectedId, yearValue(els.personBorn));
-  setDied(state.fam, state.selectedId, { dead: els.personDead.checked, died: yearValue(els.personDied) });
+  setBorn(state.fam, state.selectedId, dateValue(els.personBorn));
+  setDied(state.fam, state.selectedId, { dead: els.personDead.checked, died: dateValue(els.personDied) });
+  showError('');
   familyChanged();
 });
 
 els.unionForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  setSince(state.fam, state.selectedId, yearValue(els.unionSince));
+  try {
+    setSince(state.fam, state.selectedId, dateValue(els.unionSince));
+  } catch (err) {
+    showError(err.message);
+    return;
+  }
+  showError('');
   familyChanged();
 });
 
 els.childForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  const child = addPerson(state.fam, {
-    name: els.childName.value,
-    born: yearValue(els.childBorn),
-    parent: state.selectedId,
-    added: Date.now(),
-  });
+  let child;
+  try {
+    child = addPerson(state.fam, { name: els.childName.value, born: dateValue(els.childBorn), parent: state.selectedId, added: Date.now() });
+  } catch (err) {
+    showError(err.message);
+    return;
+  }
+  showError('');
   els.childName.value = '';
   els.childBorn.value = '';
   state.selectedId = child.id;
@@ -366,8 +456,8 @@ els.pairForm.addEventListener('submit', (e) => {
   try {
     const partnerId =
       els.pairPartner.value ||
-      addPerson(state.fam, { name: els.pairName.value, born: yearValue(els.pairBorn), added: Date.now() }).id;
-    const union = addUnion(state.fam, state.selectedId, partnerId, yearValue(els.pairSince));
+      addPerson(state.fam, { name: els.pairName.value, born: dateValue(els.pairBorn), added: Date.now() }).id;
+    const union = addUnion(state.fam, state.selectedId, partnerId, dateValue(els.pairSince));
     els.pairName.value = '';
     els.pairBorn.value = '';
     els.pairSince.value = '';
@@ -404,9 +494,32 @@ els.parentBtn.addEventListener('click', () => {
   els.personName.select();
 });
 
+for (const input of els.photoInputs) {
+  input.addEventListener('change', () => {
+    const [file] = input.files;
+    input.value = '';
+    if (file && !isUnionId(state.selectedId)) uploadPhoto(state.selectedId, file);
+  });
+}
+els.photoRemove.addEventListener('click', () => removePhoto(state.selectedId));
+els.personFrom.addEventListener('change', () => {
+  try {
+    setParent(state.fam, state.selectedId, els.personFrom.value);
+    familyChanged();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
 els.treeForm.addEventListener('submit', (e) => {
   e.preventDefault();
-  const person = addPerson(state.fam, { name: els.treeName.value, born: yearValue(els.treeBorn), added: Date.now() });
+  let person;
+  try {
+    person = addPerson(state.fam, { name: els.treeName.value, born: dateValue(els.treeBorn), added: Date.now() });
+  } catch (err) {
+    showError(err.message);
+    return;
+  }
   els.treeName.value = '';
   els.treeBorn.value = '';
   state.selectedId = person.id;
@@ -444,7 +557,14 @@ els.outlineExport.addEventListener('click', () => {
 
 els.outlineApply.addEventListener('click', () => {
   try {
+    const before = state.fam;
     state.fam = parseFamily(els.outline.value, Date.now());
+    // Фото в тексте не пишутся: переносим их тем, кого узнали по имени и году.
+    for (const person of state.fam.people) {
+      const same = before.people.find((p) => p.photo && p.name === person.name && p.born === person.born);
+      if (same) person.photo = same.photo;
+    }
+    loadPhotos({ prune: true });
     state.selectedId = roots(state.fam)[0].id;
     els.outlineError.hidden = true;
     familyChanged({ regrow: true });
@@ -486,6 +606,7 @@ els.zoomFit.addEventListener('click', () => flat.fit());
 
 els.reset.addEventListener('click', () => {
   state.fam = parseFamily(DEMO, Date.now());
+  loadPhotos({ prune: true });
   state.selectedId = roots(state.fam)[0].id;
   els.outline.value = DEMO;
   familyChanged({ regrow: true });
@@ -502,7 +623,11 @@ els.canvas.addEventListener('pointermove', (e) => {
   hoverId = renderer.hitTest(e.clientX, e.clientY);
   els.canvas.classList.toggle('is-pointer', Boolean(hoverId));
   if (hoverId && e.pointerType === 'mouse') {
-    els.tooltip.textContent = getPerson(state.fam, personIdFromTree(state.fam, hoverId))?.name ?? '';
+    const person = getPerson(state.fam, personIdFromTree(state.fam, hoverId));
+    const url = person && photoOf(person);
+    const img = document.createElement('img');
+    if (url) img.src = url;
+    els.tooltip.replaceChildren(...(url ? [img] : []), person?.name ?? '');
     els.tooltip.style.left = `${e.clientX}px`;
     els.tooltip.style.top = `${e.clientY}px`;
     els.tooltip.hidden = false;
@@ -536,6 +661,7 @@ function resize() {
 
 function frame() {
   requestAnimationFrame(frame);
+loadPhotos({ prune: true });
   if (state.view === 'editor') return;
   if (state.view === 'flat') {
     flat.frame(treeArea());

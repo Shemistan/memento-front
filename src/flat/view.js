@@ -1,7 +1,7 @@
 // Схема 2D: SVG-представление семьи — деревья людей, пары-лианы, шкала лет,
 // плавный рост, масштаб и перетаскивание. Данные — family/model.js,
 // раскладка — flat/family-layout.js, геометрия — flat/layout.js.
-import { getPerson, getUnion } from '../family/model.js';
+import { formatDate, getPerson, getUnion } from '../family/model.js';
 import { hashString } from '../layout.js';
 import { TRUNK_H, UNION_W, YEAR_PX, familyLayout, personLabel } from './family-layout.js';
 import {
@@ -64,10 +64,14 @@ function upward(angle) {
   return Math.atan2(y, x);
 }
 
-export function createFlatView(svg, { onSelect }) {
+const PHOTO = NODE_H - 6; // портрет в табличке
+
+// photoOf(person) — адрес загруженного портрета или null.
+export function createFlatView(svg, { onSelect, photoOf = () => null }) {
   const ctx = document.createElement('canvas').getContext('2d');
   ctx.font = FONT;
-  const measure = (person) => Math.max(64, Math.ceil(ctx.measureText(personLabel(person)).width + 30));
+  // Место под портрет резервируется сразу, даже пока фото грузится.
+  const measure = (person) => Math.max(64, Math.ceil(ctx.measureText(personLabel(person)).width + 30 + (person.photo ? PHOTO + 2 : 0)));
 
   const world = el('g', { class: 'flat-world' }, svg);
   const yearLayer = el('g', { class: 'flat-years' }, world);
@@ -114,6 +118,7 @@ export function createFlatView(svg, { onSelect }) {
       item.decorLeaves = keep(el('g', {}, decorLeafLayer));
       item.leaves = keep(el('g', {}, leafLayer));
       item.rect = el('rect', { y: -NODE_H / 2, height: NODE_H, rx: NODE_H / 2 }, item.node);
+      item.photo = el('image', { width: PHOTO, height: PHOTO, y: -PHOTO / 2, class: 'flat-photo', preserveAspectRatio: 'xMidYMid slice' }, item.node);
       item.text = el('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central' }, item.node);
     } else {
       const color = vineColor(fam, n.id);
@@ -144,6 +149,13 @@ export function createFlatView(svg, { onSelect }) {
     item.node.setAttribute('aria-label', personLabel(person));
     item.rect.setAttribute('x', -n.width / 2);
     item.rect.setAttribute('width', n.width);
+    const url = photoOf(person);
+    item.photo.toggleAttribute('hidden', !url);
+    if (url) {
+      item.photo.setAttribute('href', url);
+      item.photo.setAttribute('x', -n.width / 2 + 3);
+    }
+    item.text.setAttribute('x', person.photo ? (PHOTO + 2) / 2 : 0);
     // У ушедших — осенние листья (если включено «Осень у ушедших»).
     item.leaves.classList.toggle('is-gone', person.dead);
     item.decorLeaves.classList.toggle('is-gone', person.dead);
@@ -173,7 +185,7 @@ export function createFlatView(svg, { onSelect }) {
     const host = getPerson(fam, union.host);
     const partner = getPerson(fam, union.partner);
     item.partnerId = union.partner;
-    item.text.textContent = union.since ?? '';
+    item.text.textContent = formatDate(union.since, union.sinceDate);
     item.node.setAttribute('aria-label', `Пара: ${host.name} и ${partner.name}`);
     // Лиана обвивает ветки детей этой пары — но не продолжение к следующей паре.
     const kids = [...layout.nodes.values()].filter((k) => k.parentId === n.id && k.kind === 'person').map((k) => k.id);
