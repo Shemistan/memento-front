@@ -1,7 +1,7 @@
 // Схема 2D: раскладка семьи. Чистые функции без DOM.
 // Высота узла — год (кто родился раньше, стоит ниже), горизонталь —
 // Reingold–Tilford по полосам высоты, деревья разных корней — лес.
-import { childrenOf, getPerson, getUnion, isUnionId, lifeText, roots, unionsOf } from '../family/model.js';
+import { childrenOf, getPerson, getUnion, isUnionId, lifeText, roots, stamp, unionsOf } from '../family/model.js';
 import { NODE_H, barkRadius } from './layout.js';
 
 export const UNION_W = 26; // диаметр значка пары
@@ -32,12 +32,13 @@ export function yearsOf(fam) {
     if (year.has(p.id)) return year.get(p.id);
     if (busy.has(p.id)) return fallback;
     busy.add(p.id);
-    let y = p.born;
+    // Полная дата уточняет порядок: близнецы и погодки встают по старшинству.
+    let y = stamp(p.born, p.bornDate);
     if (y === null) {
       if (p.parent === null) {
         const union = fam.unions.find((u) => u.partner === p.id || u.host === p.id);
         const other = union && getPerson(fam, union.partner === p.id ? union.host : union.partner);
-        y = other?.born ?? fallback;
+        y = (other && stamp(other.born, other.bornDate)) ?? fallback;
       } else if (isUnionId(p.parent)) y = unionYear(getUnion(fam, p.parent)) + 2;
       else y = personYear(getPerson(fam, p.parent)) + 25;
     }
@@ -46,9 +47,9 @@ export function yearsOf(fam) {
   };
   const unionYear = (u) => {
     if (year.has(u.id)) return year.get(u.id);
-    let y = u.since;
+    let y = stamp(u.since, u.sinceDate);
     if (y === null) {
-      const kids = childrenOf(fam, u.id).map((c) => c.born).filter((v) => v !== null);
+      const kids = childrenOf(fam, u.id).map((c) => stamp(c.born, c.bornDate)).filter((v) => v !== null);
       const elder = Math.max(personYear(getPerson(fam, u.host)), personYear(getPerson(fam, u.partner)));
       y = kids.length ? Math.min(...kids) - 1 : elder + 22;
     }

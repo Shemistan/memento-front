@@ -1,9 +1,11 @@
 // Семья: люди, пары и кто от кого родился. Только данные, без отрисовки.
-// Человек: { id: 'pN', name, born, dead, died, parent, added }; parent — id пары
-// (ребёнок пары), id человека (ребёнок без пары) или null (корень своего
-// дерева). dead — человека нет в живых; died — год смерти, если известен.
-// Пара: { id: 'uN', host, partner, since } — дети пары растут на дереве host,
-// лиана тянется к нему от partner.
+// Человек: { id: 'pN', name, born, bornDate, dead, died, diedDate, photo, parent,
+// added }; parent — id пары (ребёнок пары), id человека (ребёнок без пары) или
+// null (корень своего дерева). born/died — год, bornDate/diedDate — полная дата
+// 'ГГГГ-ММ-ДД', если известна. dead — человека нет в живых (год может быть
+// неизвестен). photo — id портрета в хранилище фото (family/photos.js).
+// Пара: { id: 'uN', host, partner, since, sinceDate } — дети пары растут на
+// дереве host, лиана тянется к нему от partner.
 import { ROOT_ID } from '../model.js';
 
 export function createFamily() {
@@ -17,18 +19,60 @@ export const childrenOf = (fam, parentId) => fam.people.filter((p) => p.parent =
 export const roots = (fam) => fam.people.filter((p) => p.parent === null);
 
 const cleanName = (name, fallback) => String(name ?? '').trim() || fallback;
-const cleanYear = (year) => {
-  if (year === null || year === undefined || String(year).trim() === '') return null;
-  const n = Math.round(Number(year));
-  return Number.isFinite(n) && n > 0 && n < 3000 ? n : null;
-};
+// --- даты ---
+// Дата — год или полная: «1926», «12.03.1926», «1926-03-12». Хранится как
+// { year, date }: date — 'ГГГГ-ММ-ДД' или null, если известен только год.
+
+const validYear = (y) => Number.isInteger(y) && y > 0 && y < 3000;
+const pad = (n, w = 2) => String(n).padStart(w, '0');
+
+// null — даты нет; undefined — ввод не похож на дату.
+export function parseDate(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return validYear(Math.round(value)) ? { year: Math.round(value), date: null } : undefined;
+  const text = String(value).trim();
+  if (!text || text === '?') return null;
+  if (/^\d{1,4}$/.test(text)) return validYear(Number(text)) ? { year: Number(text), date: null } : undefined;
+  let m = text.match(/^(\d{1,2})[./](\d{1,2})[./](\d{3,4})$/);
+  const [y, mo, d] = m ? [m[3], m[2], m[1]].map(Number) : (text.match(/^(\d{3,4})-(\d{1,2})-(\d{1,2})$/) || []).slice(1).map(Number);
+  if (!y) return undefined;
+  const check = new Date(Date.UTC(y, mo - 1, d));
+  if (!validYear(y) || check.getUTCMonth() !== mo - 1 || check.getUTCDate() !== d) return undefined;
+  return { year: y, date: `${pad(y, 4)}-${pad(mo)}-${pad(d)}` };
+}
+
+export function formatDate(year, date = null) {
+  if (date) {
+    const [y, m, d] = date.split('-');
+    return `${d}.${m}.${Number(y)}`;
+  }
+  return year === null || year === undefined ? '' : String(year);
+}
+
+// Дробный год: для порядка и проверок, когда известна полная дата.
+export function stamp(year, date = null) {
+  if (year === null || year === undefined) return null;
+  if (!date) return year;
+  const [y, m, d] = date.split('-').map(Number);
+  return y + (Date.UTC(y, m - 1, d) - Date.UTC(y, 0, 1)) / 31622400000;
+}
+
+function toDate(value) {
+  const parsed = parseDate(value);
+  if (parsed === undefined) throw new Error(`Не похоже на дату: «${value}». Пишите год или дд.мм.гггг`);
+  return parsed;
+}
+
+// Мягкий разбор для старых и чужих данных: непонятное — как «нет даты».
+const softDate = (value) => parseDate(value) ?? null;
+
 
 // Пары, где человек — host, по году брака (без года — в конце, по порядку создания).
 export function unionsOf(fam, personId) {
   const hosted = fam.unions.filter((u) => u.host === personId);
   return hosted
     .map((u, i) => ({ u, i }))
-    .sort((a, b) => (a.u.since ?? Infinity) - (b.u.since ?? Infinity) || a.i - b.i)
+    .sort((a, b) => (stamp(a.u.since, a.u.sinceDate) ?? Infinity) - (stamp(b.u.since, b.u.sinceDate) ?? Infinity) || a.i - b.i)
     .map(({ u }) => u);
 }
 
@@ -65,7 +109,16 @@ export function addPerson(fam, { name, born = null, died = null, dead = false, p
     throw new Error(`Нет родителя ${parent}`);
   }
   fam.seq += 1;
-  const person = { id: `p${fam.seq}`, name: cleanName(name, `Человек ${fam.seq}`), born: cleanYear(born), parent, added };
+  const birth = toDate(born);
+  const person = {
+    id: `p${fam.seq}`,
+    name: cleanName(name, `Человек ${fam.seq}`),
+    born: birth?.year ?? null,
+    bornDate: birth?.date ?? null,
+    parent,
+    added,
+    photo: null,
+  };
   setDeath(person, { dead, died });
   // before — встать в списке перед этим человеком: порядок корней задаёт,
   // какое дерево главное.
@@ -77,8 +130,10 @@ export function addPerson(fam, { name, born = null, died = null, dead = false, p
 
 // Год смерти делает человека ушедшим; dead без года — «умер, год неизвестен».
 function setDeath(person, { dead, died }) {
-  person.died = cleanYear(died);
-  person.dead = Boolean(dead) || person.died !== null;
+  const death = toDate(died);
+  person.died = death?.year ?? null;
+  person.diedDate = death?.date ?? null;
+  person.dead = Boolean(dead) || death !== null;
 }
 
 export function setDied(fam, id, { dead = false, died = null } = {}) {
@@ -117,7 +172,8 @@ export function addUnion(fam, hostId, partnerId, since = null) {
   );
   if (same) throw new Error('Такая пара уже есть');
   fam.seq += 1;
-  const union = { id: `u${fam.seq}`, host: hostId, partner: partnerId, since: cleanYear(since) };
+  const married = toDate(since);
+  const union = { id: `u${fam.seq}`, host: hostId, partner: partnerId, since: married?.year ?? null, sinceDate: married?.date ?? null };
   fam.unions.push(union);
   return union;
 }
@@ -129,15 +185,60 @@ export function renamePerson(fam, id, name) {
   return person;
 }
 
-export function setBorn(fam, id, year) {
+export function setBorn(fam, id, value) {
   const person = getPerson(fam, id);
-  if (person) person.born = cleanYear(year);
+  const birth = toDate(value);
+  if (person) {
+    person.born = birth?.year ?? null;
+    person.bornDate = birth?.date ?? null;
+  }
   return person;
+}
+
+export function setPhoto(fam, id, photoId) {
+  const person = getPerson(fam, id);
+  if (person) person.photo = photoId ?? null;
+  return person;
+}
+
+// Кому из родителей принадлежит ребёнок: одному человеку или паре. Варианты —
+// нынешний «носитель» ребёнка и все пары, где он host или partner.
+export function parentOptions(fam, childId) {
+  const child = getPerson(fam, childId);
+  if (!child || child.parent === null) return [];
+  const carrier = carrierOf(fam, child.parent);
+  const unions = fam.unions.filter((u) => u.host === carrier || u.partner === carrier);
+  return [carrier, ...unions.map((u) => u.id)];
+}
+
+// Перевесить ребёнка на другого родителя или пару. Потомок не может стать
+// родителем своего предка.
+export function setParent(fam, childId, parentId) {
+  const child = getPerson(fam, childId);
+  if (!child) throw new Error('Нет такого человека');
+  const union = isUnionId(parentId) ? getUnion(fam, parentId) : null;
+  const elders = union ? [union.host, union.partner] : [parentId];
+  if (!elders.every((id) => getPerson(fam, id))) throw new Error('Нет такого родителя');
+  for (const elder of elders) {
+    let cur = elder;
+    const seen = new Set();
+    while (cur && !seen.has(cur)) {
+      if (cur === childId) throw new Error('Потомок не может быть родителем своего предка');
+      seen.add(cur);
+      cur = carrierOf(fam, getPerson(fam, cur)?.parent ?? null);
+    }
+  }
+  child.parent = parentId;
+  return child;
 }
 
 export function setSince(fam, id, year) {
   const union = getUnion(fam, id);
-  if (union) union.since = cleanYear(year);
+  const married = toDate(year);
+  if (union) {
+    union.since = married?.year ?? null;
+    union.sinceDate = married?.date ?? null;
+  }
   return union;
 }
 
@@ -169,18 +270,23 @@ export function removePerson(fam, id) {
 
 // --- текстовый формат ---
 // «Имя 1950» — человек; «Имя 1926–1998» — с годом смерти, «Имя 1926–?» —
-// умер, год неизвестен. Отступ — ребёнок строки выше.
+// умер, год неизвестен. Вместо года — полная дата: «12.03.1926».
+// Отступ — ребёнок строки выше.
 // «+ Имя 1952 (1975)» — пара с человеком выше; её дети — с отступом под ней.
 // «+ @Имя 1952» — пара с человеком, описанным в другом месте (по имени и году).
 
-const LIFE = String.raw`(?:\s+(\d{3,4}|\?)(?:\s*([–—-])\s*(\d{3,4}|\?)?)?)?`;
+const DATE = String.raw`\d{1,2}\.\d{1,2}\.\d{3,4}|\d{3,4}|\?`;
+const LIFE = String.raw`(?:\s+(${DATE})(?:\s*([–—-])\s*(${DATE})?)?)?`;
 const PERSON_RE = new RegExp(String.raw`^(.*?)${LIFE}$`);
-const UNION_RE = new RegExp(String.raw`^\+\s*(@)?\s*(.*?)${LIFE}(?:\s*\((\d{3,4})\))?$`);
+const UNION_RE = new RegExp(String.raw`^\+\s*(@)?\s*(.*?)${LIFE}(?:\s*\((\d{1,2}\.\d{1,2}\.\d{3,4}|\d{3,4})\))?$`);
 
 // Годы жизни для подписи: «1926», «1926–1998», «?–1998», «1926–?».
-export function lifeText(person) {
-  if (!person.dead) return person.born === null ? '' : String(person.born);
-  return `${person.born ?? '?'}–${person.died ?? '?'}`;
+// full — с полными датами, где они известны: «12.03.1926–1998».
+export function lifeText(person, { full = false } = {}) {
+  const born = full ? formatDate(person.born, person.bornDate) : formatDate(person.born);
+  const died = full ? formatDate(person.died, person.diedDate) : formatDate(person.died);
+  if (!person.dead) return born;
+  return `${born || '?'}–${died || '?'}`;
 }
 
 const life = (born, dash, died) => ({ born: born === '?' ? null : born, dead: Boolean(dash), died: died === '?' ? null : died });
@@ -205,8 +311,9 @@ export function parseFamily(text, added = 0) {
       const [, ref, name, born, dash, died, since] = line.match(UNION_RE);
       if (!above || isUnionId(above)) throw new Error(`Строка ${no}: пара должна стоять под человеком`);
       if (!name.trim()) throw new Error(`Строка ${no}: не указано имя супруга`);
-      const union = { id: null, host: above, partner: null, since: cleanYear(since) };
-      if (ref) refs.push({ union, name: name.trim(), born: cleanYear(born), no });
+      const married = toDate(since);
+      const union = { id: null, host: above, partner: null, since: married?.year ?? null, sinceDate: married?.date ?? null };
+      if (ref) refs.push({ union, name: name.trim(), born: toDate(born)?.year ?? null, no });
       else union.partner = addPerson(fam, { name, ...life(born, dash, died), added }).id;
       fam.seq += 1;
       union.id = `u${fam.seq}`;
@@ -227,7 +334,7 @@ export function parseFamily(text, added = 0) {
 }
 
 const lifeSuffix = (person) => {
-  const text = lifeText(person);
+  const text = lifeText(person, { full: true });
   return text ? ` ${text}` : '';
 };
 
@@ -239,7 +346,7 @@ export function toFamilyText(fam) {
     for (const child of childrenOf(fam, person.id)) walkPerson(child, depth + 1);
     for (const union of unionsOf(fam, person.id)) {
       const partner = getPerson(fam, union.partner);
-      const since = union.since === null ? '' : ` (${union.since})`;
+      const since = union.since === null ? '' : ` (${formatDate(union.since, union.sinceDate)})`;
       // Ссылка ищет человека по имени и году рождения — смерть в ней лишняя.
       const who = inline(partner) ? `${partner.name}${lifeSuffix(partner)}` : `@${partner.name}${partner.born === null ? '' : ` ${partner.born}`}`;
       lines.push(`${'  '.repeat(depth + 1)}+ ${who}${since}`);
@@ -261,24 +368,32 @@ export function checks(fam) {
     const union = getUnion(fam, person.parent);
     return [getPerson(fam, union.host), getPerson(fam, union.partner)];
   };
+  const birth = (p) => stamp(p.born, p.bornDate);
+  const death = (p) => stamp(p.died, p.diedDate);
+  // Без полных дат сравниваем годы с запасом в год; с датами — точнее.
+  const slack = (a, b) => (a && b ? 0.8 : 1);
   for (const person of fam.people) {
-    if (person.born !== null && person.died !== null && person.died < person.born) warn(person.id, 'Год смерти раньше года рождения');
+    if (person.born !== null && person.died !== null && death(person) < birth(person)) warn(person.id, 'Дата смерти раньше даты рождения');
     if (person.born === null) continue;
     for (const parent of parentsOf(person)) {
-      if (parent?.died !== null && parent?.died !== undefined && person.born > parent.died + 1) {
-        warn(person.id, `Родился(-ась) после смерти родителя: ${parent.name}, ${parent.died}`);
+      if (!parent) continue;
+      if (parent.died !== null && birth(person) > death(parent) + slack(person.bornDate, parent.diedDate)) {
+        warn(person.id, `Родился(-ась) после смерти родителя: ${parent.name}, ${formatDate(parent.died, parent.diedDate)}`);
       }
-      if (parent?.born !== null && parent?.born !== undefined && person.born - parent.born < 12) {
-        warn(person.id, `Родитель слишком молод: ${parent.name}, ${parent.born}`);
+      if (parent.born !== null && birth(person) - birth(parent) < 12) {
+        warn(person.id, `Родитель слишком молод: ${parent.name}, ${formatDate(parent.born, parent.bornDate)}`);
       }
     }
   }
   for (const union of fam.unions) {
     if (union.since === null) continue;
+    const married = stamp(union.since, union.sinceDate);
     for (const id of [union.host, union.partner]) {
       const person = getPerson(fam, id);
-      if (person.died !== null && union.since > person.died) warn(union.id, `Брак после смерти: ${person.name}, ${person.died}`);
-      if (person.born !== null && union.since < person.born) warn(union.id, `Брак раньше рождения: ${person.name}, ${person.born}`);
+      if (person.died !== null && married > death(person) + (union.sinceDate && person.diedDate ? 0 : 0.99)) {
+        warn(union.id, `Брак после смерти: ${person.name}, ${formatDate(person.died, person.diedDate)}`);
+      }
+      if (person.born !== null && married < birth(person)) warn(union.id, `Брак раньше рождения: ${person.name}, ${formatDate(person.born, person.bornDate)}`);
     }
   }
   return found;
@@ -296,14 +411,20 @@ export function deserialize(json) {
   const ids = new Set(data.people.map((p) => String(p.id)));
   fam.unions = data.unions
     .filter((u) => ids.has(u.host) && ids.has(u.partner) && u.host !== u.partner)
-    .map((u) => ({ id: String(u.id), host: u.host, partner: u.partner, since: cleanYear(u.since) }));
+    .map((u) => {
+      const married = softDate(u.sinceDate ?? u.since);
+      return { id: String(u.id), host: u.host, partner: u.partner, since: married?.year ?? null, sinceDate: married?.date ?? null };
+    });
   const unionIds = new Set(fam.unions.map((u) => u.id));
   fam.people = data.people.map((p) => ({
     id: String(p.id),
     name: cleanName(p.name, String(p.id)),
-    born: cleanYear(p.born),
-    died: cleanYear(p.died),
-    dead: Boolean(p.dead) || cleanYear(p.died) !== null,
+    born: softDate(p.bornDate ?? p.born)?.year ?? null,
+    bornDate: softDate(p.bornDate ?? p.born)?.date ?? null,
+    died: softDate(p.diedDate ?? p.died)?.year ?? null,
+    diedDate: softDate(p.diedDate ?? p.died)?.date ?? null,
+    dead: Boolean(p.dead) || softDate(p.diedDate ?? p.died) !== null,
+    photo: typeof p.photo === 'string' ? p.photo : null,
     parent: ids.has(p.parent) || unionIds.has(p.parent) ? p.parent : null,
     added: Number(p.added) || 0,
   }));

@@ -44,43 +44,56 @@
     <section class="panel__section">
       <h2 id="sel-title">Выбран человек</h2>
       <form id="person-form">
+        <div class="photo-row">
+          <label class="photo-pick" title="Загрузить фото">
+            <img id="person-photo" alt="" hidden>
+            <span id="person-initials"></span>
+            <input id="photo-input" type="file" accept="image/*" aria-label="Загрузить фото">
+          </label>
+          <div class="photo-actions">
+            <label class="ghost file-btn">Загрузить фото<input id="photo-input-2" type="file" accept="image/*"></label>
+            <button id="photo-remove" type="button" class="ghost">Убрать фото</button>
+          </div>
+        </div>
         <div class="row">
           <input id="person-name" type="text" maxlength="60" aria-label="Имя">
           <button type="submit" class="ghost">Сохранить</button>
         </div>
         <div class="row">
-          <input id="person-born" class="year" type="number" min="1" max="2999" placeholder="Рожд." aria-label="Год рождения">
+          <input id="person-born" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Рождение" aria-label="Дата рождения">
           <span class="muted">–</span>
-          <input id="person-died" class="year" type="number" min="1" max="2999" placeholder="Смерть" aria-label="Год смерти">
+          <input id="person-died" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Смерть" aria-label="Дата смерти">
           <label class="check"><input id="person-dead" type="checkbox"> нет в живых</label>
         </div>
+        <label id="from-row" class="row from-row" hidden><span class="muted">Чей ребёнок</span><select id="person-from"></select></label>
         <p id="person-warn" class="warn" hidden></p>
       </form>
       <div id="union-box" hidden>
         <p id="union-names" class="pair-names"></p>
         <form id="union-form" class="row">
-          <label class="muted" for="union-since">Год брака</label>
-          <input id="union-since" class="year" type="number" min="1" max="2999" placeholder="Год">
+          <label class="muted" for="union-since">Дата брака</label>
+          <input id="union-since" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Год">
           <button type="submit" class="ghost">Сохранить</button>
         </form>
       </div>
       <form id="child-form" class="row">
         <input id="child-name" type="text" maxlength="60" aria-label="Имя ребёнка">
-        <input id="child-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения ребёнка">
+        <input id="child-born" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Год" aria-label="Год рождения ребёнка">
         <button type="submit" class="primary">Ребёнок</button>
       </form>
       <p id="child-hint" class="muted hint"></p>
+      <p id="sel-error" class="error" hidden></p>
       <details id="pair-box" class="pair-box">
         <summary>Создать пару</summary>
         <form id="pair-form">
           <select id="pair-partner" aria-label="Супруг"></select>
           <div id="pair-new" class="row">
             <input id="pair-name" type="text" maxlength="60" placeholder="Имя супруга" aria-label="Имя супруга">
-            <input id="pair-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения супруга">
+            <input id="pair-born" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Год" aria-label="Год рождения супруга">
           </div>
           <div class="row">
-            <label class="muted" for="pair-since">Год брака</label>
-            <input id="pair-since" class="year" type="number" min="1" max="2999" placeholder="Год">
+            <label class="muted" for="pair-since">Дата брака</label>
+            <input id="pair-since" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Год">
             <button type="submit" class="primary">Создать пару</button>
           </div>
           <p class="muted hint">Лиана потянется от супруга к выбранному человеку, дети пары вырастут из узла пары.</p>
@@ -99,7 +112,7 @@
       <ul id="branch-list" class="branch-list"></ul>
       <form id="tree-form" class="row">
         <input id="tree-name" type="text" maxlength="60" placeholder="Человек со своим деревом" aria-label="Имя">
-        <input id="tree-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения">
+        <input id="tree-born" class="year" inputmode="numeric" title="Год или дд.мм.гггг" placeholder="Год" aria-label="Год рождения">
         <button type="submit" class="ghost">Новое дерево</button>
       </form>
     </section>

@@ -17,7 +17,15 @@ import {
   removeUnion,
   roots,
   serialize,
+  formatDate,
+  lifeText,
+  parentOptions,
+  parseDate,
+  setBorn,
   setDied,
+  setParent,
+  setPhoto,
+  stamp,
   toFamilyText,
   toTree,
   unionsOf,
@@ -224,7 +232,7 @@ test('проверки ловят вероятные опечатки в год�
   const warn = checks(fam);
   assert.match(warn.get(byName(fam, 'Сын').id).join(), /после смерти/);
   assert.match(warn.get(byName(fam, 'Дочь').id).join(), /слишком молод/);
-  assert.match(warn.get(byName(fam, 'Ошибка').id).join(), /раньше года рождения/);
+  assert.match(warn.get(byName(fam, 'Ошибка').id).join(), /раньше даты рождения/);
   assert.match(warn.get(fam.unions[0].id).join(), /после смерти/);
   assert.equal(warn.get(byName(fam, 'Мать').id), undefined);
 });
@@ -247,4 +255,64 @@ test('редактор: ярусы поколений, карточки не н�
   }
   const nik = layout.nodes.get(byName(fam, 'Николай').id);
   assert.ok(layout.nodes.get(byName(fam, 'Пётр').id).y < nik.y, 'потомки на другом ярусе');
+});
+
+// --- полные даты, привязка ребёнка к паре ---
+
+test('даты: год или полная, неверный ввод отличим от пустого', () => {
+  assert.deepEqual(parseDate('1926'), { year: 1926, date: null });
+  assert.deepEqual(parseDate('12.03.1926'), { year: 1926, date: '1926-03-12' });
+  assert.deepEqual(parseDate('1.3.1926'), { year: 1926, date: '1926-03-01' });
+  assert.deepEqual(parseDate('1926-03-12'), { year: 1926, date: '1926-03-12' });
+  assert.equal(parseDate(''), null);
+  assert.equal(parseDate('31.02.1990'), undefined, 'такого дня нет');
+  assert.equal(parseDate('вчера'), undefined);
+  assert.equal(formatDate(1926, '1926-03-12'), '12.03.1926');
+  assert.equal(formatDate(1926), '1926');
+  assert.ok(stamp(1926, '1926-12-31') > stamp(1926, '1926-01-01'));
+});
+
+test('полные даты в людях, парах и тексте; неверная дата — понятная ошибка', () => {
+  const text = 'Николай 12.03.1926–05.11.1998\n  + Анна 1929 (17.06.1950)\n    Пётр 02.01.1952';
+  const fam = parseFamily(text);
+  const nik = byName(fam, 'Николай');
+  assert.deepEqual([nik.born, nik.bornDate, nik.died, nik.diedDate], [1926, '1926-03-12', 1998, '1998-11-05']);
+  assert.equal(fam.unions[0].sinceDate, '1950-06-17');
+  assert.equal(toFamilyText(fam), text);
+  assert.equal(lifeText(nik), '1926–1998', 'в схеме — коротко, годами');
+  assert.equal(lifeText(nik, { full: true }), '12.03.1926–05.11.1998');
+  assert.throws(() => setBorn(fam, nik.id, '31.02.1926'), /Не похоже на дату/);
+  assert.equal(nik.bornDate, '1926-03-12', 'неверный ввод не портит дату');
+  const back = deserialize(serialize(fam));
+  assert.equal(byName(back, 'Пётр').bornDate, '1952-01-02');
+});
+
+test('близнецы и погодки встают по полной дате', () => {
+  const fam = parseFamily('Мама 1950\n  Старший 20.01.1975\n  Младший 15.11.1975');
+  const layout = familyLayout(fam);
+  const y = (name) => layout.nodes.get(byName(fam, name).id).y;
+  assert.ok(y('Старший') > y('Младший'), 'кто раньше родился, тот ниже');
+});
+
+test('ребёнка можно перевесить с родителя на пару и обратно', () => {
+  const fam = createFamily();
+  const kid = addPerson(fam, { name: 'Сын', born: 1985 });
+  const { parent: mom } = addParent(fam, kid.id, { name: 'Мама' });
+  assert.deepEqual(parentOptions(fam, kid.id), [mom.id], 'пока пары нет — выбирать не из чего');
+  const dad = addPerson(fam, { name: 'Папа' });
+  const union = addUnion(fam, mom.id, dad.id, '17.06.1980');
+  assert.deepEqual(parentOptions(fam, kid.id), [mom.id, union.id]);
+  setParent(fam, kid.id, union.id);
+  assert.equal(kid.parent, union.id);
+  assert.deepEqual(parentOptions(fam, kid.id), [mom.id, union.id], 'вернуть к одному родителю можно');
+  setParent(fam, kid.id, mom.id);
+  assert.equal(kid.parent, mom.id);
+  assert.throws(() => setParent(fam, mom.id, kid.id), /Потомок/, 'цикл запрещён');
+});
+
+test('фото человека переживает сохранение', () => {
+  const fam = createFamily();
+  const p = addPerson(fam, { name: 'А' });
+  setPhoto(fam, p.id, 'ph123');
+  assert.equal(deserialize(serialize(fam)).people[0].photo, 'ph123');
 });
