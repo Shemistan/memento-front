@@ -48,6 +48,7 @@ const els = {
   leaves: $('leaves-toggle'),
   labels: $('labels-toggle'),
   wind: $('wind-toggle'),
+  nodes: $('nodes-toggle'),
   renameForm: $('rename-form'),
   renameInput: $('rename-input'),
   addForm: $('add-form'),
@@ -73,7 +74,7 @@ const renderer = createRenderer(els.canvas);
 const flat = createFlatView(els.flat, { onSelect: select });
 
 function loadState() {
-  const fallback = { tree: parseOutline(DEMO), selectedId: ROOT_ID, leaves: true, labels: false, wind: true, view: 'living' };
+  const fallback = { tree: parseOutline(DEMO), selectedId: ROOT_ID, leaves: true, labels: false, wind: true, view: 'living', nodes: true };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
@@ -86,6 +87,7 @@ function loadState() {
       labels: Boolean(data.labels),
       wind: data.wind !== false,
       view: data.view === 'flat' ? 'flat' : 'living',
+      nodes: data.nodes !== false,
     };
   } catch {
     return fallback;
@@ -103,6 +105,7 @@ function saveState() {
         labels: state.labels,
         wind: state.wind,
         view: state.view,
+        nodes: state.nodes,
       }),
     );
   } catch {
@@ -205,10 +208,16 @@ els.remove.addEventListener('click', () => {
 els.leaves.addEventListener('change', () => {
   state.leaves = els.leaves.checked;
   flat.setLeaves(state.leaves);
+flat.setNodes(state.nodes);
   saveState();
 });
 els.labels.addEventListener('change', () => {
   state.labels = els.labels.checked;
+  saveState();
+});
+els.nodes.addEventListener('change', () => {
+  state.nodes = els.nodes.checked;
+  flat.setNodes(state.nodes);
   saveState();
 });
 els.wind.addEventListener('change', () => {
@@ -336,6 +345,7 @@ window.addEventListener('resize', resize);
 els.leaves.checked = state.leaves;
 els.labels.checked = state.labels;
 els.wind.checked = state.wind;
+els.nodes.checked = state.nodes;
 els.outline.value = toOutline(state.tree);
 if (window.matchMedia('(max-width: 720px)').matches) {
   els.panel.classList.add('is-collapsed');

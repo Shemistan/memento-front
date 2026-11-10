@@ -144,7 +144,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .segmented span { display: block; padding: 6px 8px; border-radius: 8px; text-align: center; font-weight: 600; color: var(--muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
 .segmented input:checked + span { background: #fff; color: var(--ink); box-shadow: 0 1px 4px rgba(40, 30, 15, 0.16); }
 .segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
-body[data-view="flat"] [data-view="living"] { display: none; }
+body[data-view="flat"] [data-view="living"],
+body:not([data-view="flat"]) [data-view="flat"] { display: none; }
 
 /* --- Схема 2D --- */
 
@@ -166,6 +167,12 @@ body[data-view="flat"] [data-view="living"] { display: none; }
 .flat-soil { fill: #a6bf7c; }
 .flat-bark { fill: #7b5638; stroke: #5e3f27; stroke-width: 0.8; stroke-linejoin: round; }
 .flat-roots { fill: #6c4a2f; }
+/* «Показать узлы»: ветки модели темнее и чётче, остальная крона приглушена. */
+.flat-bark, .flat-decor { transition: fill 0.4s, stroke 0.4s, opacity 0.4s; }
+.flat.show-nodes .flat-decor { opacity: 0.3; }
+.flat.show-nodes .flat-real { fill: #5a3519; stroke: #3b220d; stroke-width: 1.2; }
+.flat-knot { fill: #7b5638; transition: fill 0.4s; }
+.flat.show-nodes .flat-knot { fill: #5a3519; }
 
 .flat-leaf { transition: transform 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) var(--delay, 0ms), opacity 0.4s var(--delay, 0ms); }
 .flat-leaf.tone-0 { fill: #5f9a3b; }
@@ -176,7 +183,8 @@ body[data-view="flat"] [data-view="living"] { display: none; }
    прячем лист через scale(0), а показываем, сняв правило. */
 .flat.no-leaves .flat-leaf { transform: scale(0); opacity: 0; }
 
-.flat-node { cursor: pointer; outline: none; }
+.flat-node { cursor: pointer; outline: none; transition: opacity 0.3s; }
+.flat:not(.show-nodes) .flat-node { opacity: 0; pointer-events: none; }
 .flat-node rect { fill: #fffaf0; stroke: #8a6a48; stroke-width: 1.4; transition: fill 0.15s, stroke 0.15s; }
 .flat-node text { fill: var(--ink); font: 600 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; pointer-events: none; }
 .flat-node:hover rect { fill: #fff; stroke: var(--accent); }

@@ -1,7 +1,21 @@
 // Схема 2D: SVG-представление дерева с плавным ростом, листьями,
 // масштабом и перетаскиванием. Данные и раскладка — в model.js и flat/layout.js.
 import { ROOT_ID } from '../model.js';
-import { NODE_H, ROW, barkRadius, branchPath, layoutTree, leafSpots, rootsPath, trunkPath } from './layout.js';
+import {
+  NODE_H,
+  ROW,
+  barkRadius,
+  branchCurve,
+  branchPath,
+  curveAngle,
+  layoutTree,
+  leafSpots,
+  rootsPath,
+  trunkPath,
+  twigLeaves,
+  twigPath,
+  twigSpecs,
+} from './layout.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const FONT = '600 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
@@ -21,6 +35,21 @@ const el = (name, attrs = {}, parent) => {
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const easeOut = (v) => 1 - (1 - v) ** 3;
 const near = (a, b) => Math.abs(a - b) < 0.05;
+const DEG = Math.PI / 180;
+const UP_BIAS = 0.3; // веточки тянутся к свету: направление подмешивается к «вверх»
+
+// Лист в локальных координатах группы: s — точка из leafSpots/twigLeaves.
+function leaf(s) {
+  const g = el('g', { transform: `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) rotate(${s.angle.toFixed(0)})` });
+  el('path', { d: LEAF, class: `flat-leaf tone-${s.tone}`, transform: `scale(${s.size.toFixed(1)})`, style: `--delay:${s.delay}ms` }, g);
+  return g;
+}
+
+function upward(angle) {
+  const x = Math.cos(angle) * (1 - UP_BIAS);
+  const y = Math.sin(angle) * (1 - UP_BIAS) - UP_BIAS;
+  return Math.atan2(y, x);
+}
 
 export function createFlatView(svg, { onSelect }) {
   const ctx = document.createElement('canvas').getContext('2d');
@@ -31,9 +60,12 @@ export function createFlatView(svg, { onSelect }) {
   const ground = el('g', { class: 'flat-ground' }, world);
   const hill = el('ellipse', { class: 'flat-hill' }, ground);
   const soil = el('rect', { class: 'flat-soil' }, ground);
-  const roots = el('path', { class: 'flat-bark flat-roots' }, world);
-  const trunk = el('path', { class: 'flat-bark' }, world);
+  const roots = el('path', { class: 'flat-bark flat-real flat-roots' }, world);
+  const decorLayer = el('g', { class: 'flat-decor' }, world);
+  const trunk = el('path', { class: 'flat-bark flat-real' }, world);
   const branchLayer = el('g', {}, world);
+  const knotLayer = el('g', {}, world);
+  const decorLeafLayer = el('g', { class: 'flat-decor' }, world);
   const leafLayer = el('g', { class: 'flat-leaves' }, world);
   const nodeLayer = el('g', {}, world);
 
@@ -49,12 +81,16 @@ export function createFlatView(svg, { onSelect }) {
   let lastArea = null;
 
   function makeItem(n, appear) {
-    const branch = n.id === ROOT_ID ? null : el('path', { class: 'flat-bark' }, branchLayer);
+    const branch = n.id === ROOT_ID ? null : el('path', { class: 'flat-bark flat-real' }, branchLayer);
+    // Наплыв в развилке: без табличек стык веток выглядит как у настоящего дерева.
+    const knot = el('circle', { class: 'flat-knot', r: 0 }, knotLayer);
+    const decor = el('g', {}, decorLayer);
+    const decorLeaves = el('g', {}, decorLeafLayer);
     const leaves = el('g', {}, leafLayer);
     const node = el('g', { class: 'flat-node', tabindex: '0', role: 'button', 'data-id': n.id }, nodeLayer);
     const rect = el('rect', { y: -NODE_H / 2, height: NODE_H, rx: NODE_H / 2 }, node);
     const text = el('text', { 'text-anchor': 'middle', 'dominant-baseline': 'central' }, node);
-    return { branch, leaves, node, rect, text, appear, tip: null, shown: null };
+    return { branch, knot, decor, decorLeaves, twigs: [], leaves, node, rect, text, appear, tip: null, shown: null };
   }
 
   function fillLeaves(item, n) {
@@ -62,12 +98,48 @@ export function createFlatView(svg, { onSelect }) {
     if (item.tip === tip && item.leafWidth === n.width) return;
     item.tip = tip;
     item.leafWidth = n.width;
-    item.leaves.replaceChildren(
-      ...leafSpots(n.id, { tip, width: n.width }).map((s) => {
-        const g = el('g', { transform: `translate(${s.x.toFixed(1)} ${s.y.toFixed(1)}) rotate(${s.angle.toFixed(0)})` });
-        el('path', { d: LEAF, class: `flat-leaf tone-${s.tone}`, transform: `scale(${s.size.toFixed(1)})`, style: `--delay:${s.delay}ms` }, g);
-        return g;
-      }),
+    item.leaves.replaceChildren(...leafSpots(n.id, { tip, width: n.width }).map(leaf));
+    fillTwigs(item, n, tip);
+  }
+
+  // Декоративные веточки ветки: контуры пересчитываются каждый кадр,
+  // пучки листьев на кончиках строятся один раз.
+  function fillTwigs(item, n, tip) {
+    item.decor.replaceChildren();
+    item.decorLeaves.replaceChildren();
+    item.twigs = [];
+    if (n.id === ROOT_ID) return;
+    twigSpecs(n.id, { tip }).forEach((spec, i) => {
+      const parts = [spec, ...spec.kids].map((part) => ({
+        spec: part,
+        path: el('path', { class: 'flat-bark' }, item.decor),
+        leaves: el('g', {}, item.decorLeaves),
+      }));
+      parts.forEach((part, k) => part.leaves.append(...twigLeaves(`${n.id}/${i}/${k}`).map(leaf)));
+      item.twigs.push(parts);
+    });
+  }
+
+  function drawTwigs(item, at, rAt, grow) {
+    for (const [main, ...kids] of item.twigs) {
+      const start = at(main.spec.t);
+      const angle = upward(curveAngle(at, main.spec.t) + main.spec.angle * DEG);
+      const twig = twigPath(start, angle, main.spec.len * row * 0.8 * grow, Math.max(1.3, rAt(main.spec.t) * 0.75));
+      place(main, twig, grow);
+      for (const kid of kids) {
+        const len = main.spec.len * row * 0.8 * grow;
+        const from = { x: start.x + Math.cos(angle) * len * kid.spec.t, y: start.y + Math.sin(angle) * len * kid.spec.t };
+        const sub = twigPath(from, upward(angle + kid.spec.angle * DEG), len * kid.spec.len, Math.max(0.9, rAt(main.spec.t) * 0.45));
+        place(kid, sub, grow);
+      }
+    }
+  }
+
+  function place(part, twig, grow) {
+    part.path.setAttribute('d', twig.d);
+    part.leaves.setAttribute(
+      'transform',
+      `translate(${twig.tip.x.toFixed(1)} ${twig.tip.y.toFixed(1)}) rotate(${(twig.angle / DEG + 90).toFixed(0)}) scale(${grow.toFixed(3)})`,
     );
   }
 
@@ -79,6 +151,9 @@ export function createFlatView(svg, { onSelect }) {
       if (!regrow && layout.nodes.has(id)) continue;
       item.node.remove();
       item.leaves.remove();
+      item.decor.remove();
+      item.decorLeaves.remove();
+      item.knot.remove();
       item.branch?.remove();
       items.delete(id);
     }
@@ -103,6 +178,8 @@ export function createFlatView(svg, { onSelect }) {
     for (const id of layout.order) {
       const item = items.get(id);
       if (item.branch) branchLayer.append(item.branch);
+      decorLayer.append(item.decor);
+      decorLeafLayer.append(item.decorLeaves);
       leafLayer.append(item.leaves);
       nodeLayer.append(item.node);
     }
@@ -229,9 +306,14 @@ export function createFlatView(svg, { onSelect }) {
       item.pos = pos;
       item.node.setAttribute('transform', `translate(${pos.x.toFixed(1)} ${pos.y.toFixed(1)}) scale(${grow.toFixed(3)})`);
       item.leaves.setAttribute('transform', `translate(${pos.x.toFixed(1)} ${pos.y.toFixed(1)}) scale(${grow.toFixed(3)})`);
+      item.knot.setAttribute('cx', pos.x.toFixed(1));
+      item.knot.setAttribute('cy', pos.y.toFixed(1));
+      item.knot.setAttribute('r', n.tips > 1 || !parent ? (s.r * 1.15 * grow).toFixed(2) : 0);
       if (item.branch) {
-        const tipR = Math.max(1.6, s.r * 0.55);
-        item.branch.setAttribute('d', branchPath(parent, pos, Math.min(s.r, parent.r * 0.92) * Math.max(0.3, grow), tipR * grow));
+        const r0 = Math.min(s.r, parent.r * 0.92) * Math.max(0.3, grow);
+        const r1 = Math.max(1.6, s.r * 0.55) * grow;
+        item.branch.setAttribute('d', branchPath(parent, pos, r0, r1));
+        drawTwigs(item, branchCurve(parent, pos), (t) => r1 + (r0 - r1) * (1 - t) ** 1.4, grow);
       }
     }
 
@@ -328,6 +410,9 @@ export function createFlatView(svg, { onSelect }) {
       zoomAt((area.left + area.right) / 2, area.height / 2, factor);
     },
     setLeaves: (on) => svg.classList.toggle('no-leaves', !on),
+    // Узлы видны: таблички на месте, веточки вне модели приглушены.
+    // Скрыты: все ветки одинаковые — просто дерево.
+    setNodes: (on) => svg.classList.toggle('show-nodes', on),
     wake: () => {
       animating = true;
     },
