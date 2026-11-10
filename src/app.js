@@ -7,10 +7,12 @@ import {
   checks,
   childrenOf,
   deserialize,
+  editAsSeen,
   fromTree,
   getPerson,
   getUnion,
   isUnionId,
+  mainRoot,
   parseFamily,
   personIdFromTree,
   removePerson,
@@ -28,6 +30,7 @@ import {
   toFamilyText,
   toTree,
   unionsOf,
+  viewFrom,
 } from './family/model.js';
 import { buildPlan, carryOver, pose } from './layout.js';
 import { createRenderer } from './render.js';
@@ -103,6 +106,8 @@ const els = {
   pairSince: $('pair-since'),
   pairError: $('pair-error'),
   remove: $('remove-btn'),
+  viewer: $('viewer'),
+  viewerBtn: $('viewer-btn'),
   stats: $('stats'),
   list: $('branch-list'),
   treeForm: $('tree-form'),
@@ -117,7 +122,10 @@ const els = {
 };
 
 const state = loadState();
-let plan = buildPlan(toTree(state.fam));
+// Семья глазами того, кто смотрит (state.viewer): её показывают все виды.
+// Хранится state.fam как записано, правки идут через edit().
+let shown = viewFrom(state.fam, state.viewer);
+let plan = buildPlan(toTree(shown));
 let livingLabels = labelsOf();
 let epoch = Date.now();
 let hoverId = null;
@@ -126,7 +134,7 @@ let windAmount = state.wind ? 1 : 0;
 const renderer = createRenderer(els.canvas);
 const photoOf = (person) => cachedPhoto(person.photo);
 const flat = createFlatView(els.flat, { onSelect: select, photoOf });
-const editor = createEditor(els.editor, { act: editorAct, onSelect: select, onPhoto: uploadPhoto, photoOf });
+const editor = createEditor(els.editor, { act: edit, onSelect: select, onPhoto: uploadPhoto, photoOf });
 
 // Фото: сжать до портрета, положить в хранилище, старое удалить.
 async function uploadPhoto(id, file) {
@@ -166,15 +174,15 @@ function showError(message) {
   els.selError.hidden = !message;
 }
 
-// Правка из редактора: изменить семью и показать результат во всех видах.
-function editorAct(change) {
-  const result = change(state.fam);
+// Правка семьи так, как её видит смотрящий, и показ результата во всех видах.
+function edit(change) {
+  const result = editAsSeen(state.fam, state.viewer, change);
   familyChanged();
   return result;
 }
 
 function labelsOf() {
-  return new Map(toTree(state.fam).nodes.map((n) => [n.id, n.name]));
+  return new Map(toTree(shown).nodes.map((n) => [n.id, n.name]));
 }
 
 function exists(id) {
@@ -182,7 +190,7 @@ function exists(id) {
 }
 
 function loadState() {
-  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true };
+  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true, viewer: null };
   const demo = () => {
     const fam = parseFamily(DEMO);
     return { ...settings, fam, selectedId: roots(fam)[0].id };
@@ -208,6 +216,7 @@ function loadState() {
       view: ['flat', 'editor'].includes(data.view) ? data.view : 'living',
       nodes: data.nodes !== false,
       autumn: data.autumn !== false,
+      viewer: getPerson(fam, data.viewer) ? data.viewer : null,
     };
   } catch {
     return demo();
@@ -227,6 +236,7 @@ function saveState() {
         view: state.view,
         nodes: state.nodes,
         autumn: state.autumn,
+        viewer: state.viewer,
       }),
     );
   } catch {
@@ -237,7 +247,9 @@ function saveState() {
 // regrow — семья задана заново и вырастает с нуля; иначе старые ветки
 // плавно подстраиваются под новые, а добавленные прорастают.
 function familyChanged({ regrow = false } = {}) {
-  const tree = toTree(state.fam);
+  if (!getPerson(state.fam, state.viewer)) state.viewer = null;
+  shown = viewFrom(state.fam, state.viewer);
+  const tree = toTree(shown);
   if (regrow) {
     epoch = Date.now();
     plan = buildPlan(tree);
@@ -245,11 +257,17 @@ function familyChanged({ regrow = false } = {}) {
     plan = carryOver(plan, buildPlan(tree), Date.now());
   }
   livingLabels = labelsOf();
-  if (!exists(state.selectedId)) state.selectedId = roots(state.fam)[0]?.id ?? null;
-  flat.setFamily(state.fam, { regrow });
-  editor.render(state.fam, state.selectedId);
+  if (!exists(state.selectedId)) state.selectedId = mainRoot(shown)?.id ?? null;
+  flat.setFamily(shown, { regrow });
+  editor.render(shown, state.selectedId);
   saveState();
   renderPanel();
+}
+
+// Кто смотрит: его дерево становится главным, и семья вырастает заново.
+function setViewer(id) {
+  state.viewer = getPerson(state.fam, id) ? id : null;
+  familyChanged({ regrow: true });
 }
 
 function select(id) {
@@ -261,15 +279,15 @@ function select(id) {
 
 // В живом дереве нет пар: выбранная пара подсвечивает своего host.
 function livingSelected() {
-  const id = isUnionId(state.selectedId) ? getUnion(state.fam, state.selectedId)?.host : state.selectedId;
-  return id === roots(state.fam)[0]?.id ? ROOT_ID : id;
+  const id = isUnionId(state.selectedId) ? getUnion(shown, state.selectedId)?.host : state.selectedId;
+  return id === mainRoot(shown)?.id ? ROOT_ID : id;
 }
 
 const dateValue = (input) => input.value.trim();
 const yearText = (year) => (year === null ? '' : ` · ${year}`);
 
 function renderPanel() {
-  const fam = state.fam;
+  const fam = shown;
   const union = isUnionId(state.selectedId) ? getUnion(fam, state.selectedId) : null;
   const person = union ? null : getPerson(fam, state.selectedId);
   flat.setSelected(state.selectedId);
@@ -302,7 +320,9 @@ function renderPanel() {
     els.remove.disabled = fam.people.length === 1;
     els.remove.title = els.remove.disabled ? 'Последнего человека удалить нельзя' : 'Вместе с потомками на его ветке';
     renderPartners(person);
+    els.viewerBtn.hidden = state.viewer === person.id;
   } else if (union) {
+    els.viewerBtn.hidden = true;
     const host = getPerson(fam, union.host);
     const partner = getPerson(fam, union.partner);
     els.unionNames.textContent = `${host.name} + ${partner.name}`;
@@ -317,8 +337,20 @@ function renderPanel() {
   const people = fam.people.length;
   els.stats.textContent = `${people} ${plural(people, 'человек', 'человека', 'человек')}, ${fam.unions.length} ${plural(fam.unions.length, 'пара', 'пары', 'пар')}`;
 
-  els.list.replaceChildren(...roots(fam).map((root) => personItem(root.id)));
+  const main = mainRoot(fam);
+  const trees = main ? [main, ...roots(fam).filter((r) => r !== main)] : [];
+  els.list.replaceChildren(...trees.map((root) => personItem(root.id)));
   els.list.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' });
+  renderViewer();
+}
+
+function renderViewer() {
+  const people = [...state.fam.people].sort((a, b) => a.name.localeCompare(b.name, 'ru') || (a.born ?? 0) - (b.born ?? 0));
+  els.viewer.replaceChildren(
+    new Option('Никто — как записано', ''),
+    ...people.map((p) => new Option(`${p.name}${yearText(p.born)}`, p.id)),
+  );
+  els.viewer.value = state.viewer ?? '';
 }
 
 // Супругом может стать новый человек (саженец со своим деревом) или любой
@@ -338,15 +370,15 @@ function renderPartners(person) {
 }
 
 function renderFrom(person) {
-  const options = parentOptions(state.fam, person.id);
+  const options = parentOptions(shown, person.id);
   els.fromRow.hidden = options.length < 2;
   if (els.fromRow.hidden) return;
   els.personFrom.replaceChildren(
     ...options.map((id) => {
-      if (!isUnionId(id)) return new Option(getPerson(state.fam, id).name, id);
-      const union = getUnion(state.fam, id);
+      if (!isUnionId(id)) return new Option(getPerson(shown, id).name, id);
+      const union = getUnion(shown, id);
       const since = union.since === null ? '' : ` (${formatDate(union.since, union.sinceDate)})`;
-      return new Option(`${getPerson(state.fam, union.host).name} + ${getPerson(state.fam, union.partner).name}${since}`, id);
+      return new Option(`${getPerson(shown, union.host).name} + ${getPerson(shown, union.partner).name}${since}`, id);
     }),
   );
   els.personFrom.value = person.parent;
@@ -363,7 +395,7 @@ function listButton(id, text, extra = '') {
 }
 
 function personItem(id) {
-  const fam = state.fam;
+  const fam = shown;
   const person = getPerson(fam, id);
   const li = document.createElement('li');
   li.append(listButton(id, `${person.name}${yearText(person.born)}`));
@@ -435,7 +467,8 @@ els.childForm.addEventListener('submit', (e) => {
   e.preventDefault();
   let child;
   try {
-    child = addPerson(state.fam, { name: els.childName.value, born: dateValue(els.childBorn), parent: state.selectedId, added: Date.now() });
+    const parent = state.selectedId;
+    child = edit((f) => addPerson(f, { name: els.childName.value, born: dateValue(els.childBorn), parent, added: Date.now() }).id);
   } catch (err) {
     showError(err.message);
     return;
@@ -443,8 +476,7 @@ els.childForm.addEventListener('submit', (e) => {
   showError('');
   els.childName.value = '';
   els.childBorn.value = '';
-  state.selectedId = child.id;
-  familyChanged();
+  select(child);
 });
 
 els.pairPartner.addEventListener('change', () => {
@@ -454,17 +486,17 @@ els.pairPartner.addEventListener('change', () => {
 els.pairForm.addEventListener('submit', (e) => {
   e.preventDefault();
   try {
-    const partnerId =
-      els.pairPartner.value ||
-      addPerson(state.fam, { name: els.pairName.value, born: dateValue(els.pairBorn), added: Date.now() }).id;
-    const union = addUnion(state.fam, state.selectedId, partnerId, dateValue(els.pairSince));
+    const host = state.selectedId;
+    const union = edit((f) => {
+      const partnerId = els.pairPartner.value || addPerson(f, { name: els.pairName.value, born: dateValue(els.pairBorn), added: Date.now() }).id;
+      return addUnion(f, host, partnerId, dateValue(els.pairSince)).id;
+    });
     els.pairName.value = '';
     els.pairBorn.value = '';
     els.pairSince.value = '';
     els.pairError.hidden = true;
     els.pairBox.open = false;
-    state.selectedId = union.id;
-    familyChanged();
+    select(union);
   } catch (err) {
     els.pairError.textContent = err.message;
     els.pairError.hidden = false;
@@ -474,22 +506,21 @@ els.pairForm.addEventListener('submit', (e) => {
 els.remove.addEventListener('click', () => {
   const id = state.selectedId;
   if (isUnionId(id)) {
-    const host = getUnion(state.fam, id)?.host;
-    removeUnion(state.fam, id);
-    state.selectedId = host;
+    state.selectedId = getUnion(shown, id)?.host;
+    edit((f) => removeUnion(f, id));
   } else {
     if (state.fam.people.length === 1) return;
-    const parent = getPerson(state.fam, id)?.parent;
-    removePerson(state.fam, id);
-    state.selectedId = parent;
+    state.selectedId = getPerson(state.fam, id)?.parent;
+    edit((f) => removePerson(f, id));
   }
-  familyChanged();
 });
 
+els.viewerBtn.addEventListener('click', () => setViewer(state.selectedId));
+els.viewer.addEventListener('change', () => setViewer(els.viewer.value || null));
+
 els.parentBtn.addEventListener('click', () => {
-  const { parent } = addParent(state.fam, state.selectedId, { added: Date.now() });
-  state.selectedId = parent.id;
-  familyChanged();
+  const child = state.selectedId;
+  select(edit((f) => addParent(f, child, { added: Date.now() }).parent.id));
   els.personName.focus();
   els.personName.select();
 });
@@ -504,8 +535,8 @@ for (const input of els.photoInputs) {
 els.photoRemove.addEventListener('click', () => removePhoto(state.selectedId));
 els.personFrom.addEventListener('change', () => {
   try {
-    setParent(state.fam, state.selectedId, els.personFrom.value);
-    familyChanged();
+    const child = state.selectedId;
+    edit((f) => setParent(f, child, els.personFrom.value));
   } catch (err) {
     showError(err.message);
   }
@@ -558,12 +589,14 @@ els.outlineExport.addEventListener('click', () => {
 els.outlineApply.addEventListener('click', () => {
   try {
     const before = state.fam;
+    const viewer = getPerson(before, state.viewer);
     state.fam = parseFamily(els.outline.value, Date.now());
-    // Фото в тексте не пишутся: переносим их тем, кого узнали по имени и году.
+    // Фото и «кто смотрит» в тексте не пишутся: узнаём людей по имени и году.
     for (const person of state.fam.people) {
       const same = before.people.find((p) => p.photo && p.name === person.name && p.born === person.born);
       if (same) person.photo = same.photo;
     }
+    state.viewer = state.fam.people.find((p) => viewer && p.name === viewer.name && p.born === viewer.born)?.id ?? null;
     loadPhotos({ prune: true });
     state.selectedId = roots(state.fam)[0].id;
     els.outlineError.hidden = true;
@@ -606,6 +639,7 @@ els.zoomFit.addEventListener('click', () => flat.fit());
 
 els.reset.addEventListener('click', () => {
   state.fam = parseFamily(DEMO, Date.now());
+  state.viewer = null;
   loadPhotos({ prune: true });
   state.selectedId = roots(state.fam)[0].id;
   els.outline.value = DEMO;
@@ -623,7 +657,7 @@ els.canvas.addEventListener('pointermove', (e) => {
   hoverId = renderer.hitTest(e.clientX, e.clientY);
   els.canvas.classList.toggle('is-pointer', Boolean(hoverId));
   if (hoverId && e.pointerType === 'mouse') {
-    const person = getPerson(state.fam, personIdFromTree(state.fam, hoverId));
+    const person = getPerson(shown, personIdFromTree(shown, hoverId));
     const url = person && photoOf(person);
     const img = document.createElement('img');
     if (url) img.src = url;
@@ -643,7 +677,7 @@ els.canvas.addEventListener('pointerleave', () => {
 
 els.canvas.addEventListener('click', (e) => {
   const id = renderer.hitTest(e.clientX, e.clientY);
-  if (id) select(personIdFromTree(state.fam, id));
+  if (id) select(personIdFromTree(shown, id));
 });
 
 // --- кадр ---
@@ -691,11 +725,11 @@ if (window.matchMedia('(max-width: 720px)').matches) {
   els.panel.classList.add('is-collapsed');
   els.panelToggle.setAttribute('aria-expanded', 'false');
 }
-flat.setFamily(state.fam, { regrow: true });
+flat.setFamily(shown, { regrow: true });
 flat.setLeaves(state.leaves);
 flat.setNodes(state.nodes);
 flat.setAutumn(state.autumn);
-editor.render(state.fam, state.selectedId);
+editor.render(shown, state.selectedId);
 applyView();
 resize();
 renderPanel();

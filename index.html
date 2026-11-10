@@ -33,6 +33,11 @@
       <label><input type="radio" name="view" value="editor"><span>Редактор</span></label>
     </div>
 
+    <label class="row viewer-row" title="Главным станет дерево этого человека, лианы потянутся от супругов из других семей">
+      <span class="muted">Кто смотрит</span>
+      <select id="viewer"></select>
+    </label>
+
     <section class="panel__section switches">
       <label class="switch"><input id="leaves-toggle" type="checkbox" checked><span></span>Листья</label>
       <label class="switch" data-view="living"><input id="labels-toggle" type="checkbox"><span></span>Подписи</label>
@@ -102,6 +107,7 @@
       </details>
       <div class="row row--split">
         <button id="parent-btn" type="button" class="ghost">↑ Родитель</button>
+        <button id="viewer-btn" type="button" class="ghost" title="Смотреть на семью глазами этого человека">Это я</button>
         <button id="remove-btn" type="button" class="danger">Удалить</button>
         <span id="stats" class="muted"></span>
       </div>

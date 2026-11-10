@@ -189,6 +189,8 @@ body:not([data-view="flat"]) [data-view="flat"] { display: none; }
 .flat.autumn .is-gone .flat-leaf.tone-2 { fill: #b0562c; }
 .flat.autumn .is-gone .flat-leaf.tone-3 { fill: #ddb85a; }
 .flat-node.is-gone rect { fill: #f3ede2; }
+/* Тот, кто смотрит: от его дерева строится главное. */
+.flat-node.is-viewer rect { stroke: var(--accent); stroke-width: 3; }
 
 /* Лианы пар: цвет задаётся атрибутом stroke — у каждой пары свой. */
 .flat-vine { fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -254,6 +256,8 @@ select {
 .file-btn { position: relative; display: inline-block; padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; font-weight: 600; cursor: pointer; }
 .photo-actions button { padding: 6px 10px; font-size: 13px; }
 .from-row select { margin: 0; }
+.viewer-row { margin-bottom: 10px; }
+.viewer-row select { flex: 1; min-width: 0; margin: 0; }
 .from-row span { white-space: nowrap; }
 .tooltip { display: flex; align-items: center; gap: 8px; }
 .tooltip img { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; }
@@ -309,6 +313,19 @@ body[data-view="editor"] .switches { display: none; }
   transition: left 0.3s ease, top 0.3s ease, box-shadow 0.15s, border-color 0.15s;
 }
 .ecard.is-gone { background: #f1ebdf; }
+.ecard.is-viewer { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ecard.is-viewer::after {
+  content: 'вы смотрите';
+  position: absolute;
+  bottom: -9px;
+  left: 14px;
+  padding: 0 7px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  line-height: 17px;
+}
 .ecard.is-selected { border-color: #c99a1c; box-shadow: 0 0 0 3px rgba(255, 196, 61, 0.55), 0 4px 14px rgba(60, 45, 25, 0.1); }
 .ecard input { min-width: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; }
 .ecard input:hover { border-color: var(--line); }
