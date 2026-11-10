@@ -65,6 +65,8 @@ const els = {
   flat: $('flat'),
   editor: $('editor'),
   autumn: $('autumn-toggle'),
+  density: $('density'),
+  densityValue: $('density-value'),
   personDied: $('person-died'),
   personDead: $('person-dead'),
   personWarn: $('person-warn'),
@@ -209,7 +211,7 @@ function exists(id) {
 function loadState() {
   // source — savedAt опубликованной версии, от которой идёт семья в этом
   // браузере; dirty — с тех пор её правили здесь.
-  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true, viewer: null, source: null, dirty: false };
+  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true, density: 1, viewer: null, source: null, dirty: false };
   const demo = () => {
     const fam = parseFamily(DEMO);
     return { ...settings, fam, selectedId: roots(fam)[0].id };
@@ -235,6 +237,7 @@ function loadState() {
       view: ['flat', 'editor'].includes(data.view) ? data.view : 'living',
       nodes: data.nodes !== false,
       autumn: data.autumn !== false,
+      density: Number.isFinite(data.density) ? Math.min(2.5, Math.max(0, data.density)) : 1,
       viewer: getPerson(fam, data.viewer) ? data.viewer : null,
       source: typeof data.source === 'string' ? data.source : null,
       dirty: Boolean(data.dirty),
@@ -257,6 +260,7 @@ function saveState() {
         view: state.view,
         nodes: state.nodes,
         autumn: state.autumn,
+        density: state.density,
         viewer: state.viewer,
         source: state.source,
         dirty: state.dirty,
@@ -620,6 +624,12 @@ els.autumn.addEventListener('change', () => {
   flat.setAutumn(state.autumn);
   saveState();
 });
+els.density.addEventListener('input', () => {
+  state.density = Number(els.density.value);
+  els.densityValue.textContent = state.density;
+  flat.setDensity(state.density);
+  saveState();
+});
 els.wind.addEventListener('change', () => {
   state.wind = els.wind.checked;
   saveState();
@@ -904,6 +914,9 @@ flat.setFamily(shown, { regrow: true });
 flat.setLeaves(state.leaves);
 flat.setNodes(state.nodes);
 flat.setAutumn(state.autumn);
+flat.setDensity(state.density);
+els.density.value = state.density;
+els.densityValue.textContent = state.density;
 editor.render(shown, state.selectedId);
 applyView();
 resize();
