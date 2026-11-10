@@ -294,7 +294,61 @@ body[data-view="editor"] .switches { display: none; }
   color: var(--muted);
   font-size: 13px;
 }
-.editor-world { position: relative; margin: 0 auto; }
+.editor.is-dragging { cursor: grabbing; user-select: none; }
+.editor-bar {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: fit-content;
+  max-width: 100%;
+  padding: 10px 16px 0;
+}
+.editor-bar .editor-hint { position: static; padding: 4px 0 0; }
+.editor-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 13px; }
+.editor-crumbs button { padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-bg); color: var(--ink); font-size: 13px; cursor: pointer; }
+.editor-crumbs button:hover { border-color: var(--accent); color: var(--accent); }
+.editor-crumbs [aria-current] { font-weight: 700; }
+.editor-crumbs button[aria-current] { border-color: var(--accent); }
+.editor-crumbs__sep { color: var(--muted); }
+.editor-sizer { position: relative; margin: 0 auto; }
+.editor-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+
+/* Издалека: на карточке только фото и крупное имя. */
+.editor.is-far .ecard__life,
+.editor.is-far .ecard__actions,
+.editor.is-far .ecard__up,
+.editor.is-far .ecard__from,
+.editor.is-far .eunion input,
+.editor.is-far .eunion button { visibility: hidden; }
+.editor.is-far .ecard__name { grid-row: 1 / 3; font-size: 30px; text-overflow: ellipsis; }
+.editor.is-far .ecard.is-viewer::after { font-size: 26px; line-height: 34px; bottom: -20px; }
+
+.epicker { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 16px; background: rgba(40, 32, 20, 0.35); }
+.epicker[hidden] { display: none; }
+.epicker__box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(440px, 100%);
+  max-height: min(640px, calc(100vh - 32px));
+  padding: 14px 16px 16px;
+  border-radius: 14px;
+  background: #fffaf0;
+  box-shadow: 0 12px 40px rgba(40, 32, 20, 0.3);
+}
+.epicker__box p { margin: 0; font-size: 12px; }
+.epicker__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.epicker__search { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.epicker__list { flex: 1; min-height: 80px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.epicker__list li { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-size: 13px; }
+.epicker__list li.is-self { padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
+.epicker__pick { flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--ink); text-align: left; font: inherit; cursor: pointer; }
+.epicker__pick:hover:not(:disabled) { border-color: var(--accent); background: #fff; }
+.epicker__pick:disabled { color: var(--muted); cursor: default; }
+.is-self .epicker__pick { font-weight: 700; }
+.epicker__open { padding: 4px 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 15px; cursor: pointer; }
+.epicker__open:hover { border-color: var(--accent); color: var(--accent); }
 .editor-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
 .editor-link { fill: none; stroke: #a08463; stroke-width: 1.6; stroke-linejoin: round; }
 .editor-link--pair { stroke-width: 2; stroke-dasharray: 6 5; }

@@ -104,6 +104,46 @@ export function rootOf(fam, personId) {
   return person;
 }
 
+// Ветка от человека: он сам, его потомки и их супруги — чтобы редактировать
+// часть большой семьи. Супруги стоят без своей родни, а пары развёрнуты к
+// крови ветки. Это копия для показа: id те же, семья не меняется.
+export function branchFamily(fam, rootId) {
+  if (!getPerson(fam, rootId)) return null;
+  const blood = new Set();
+  const unions = new Set();
+  const queue = [rootId];
+  while (queue.length) {
+    const id = queue.shift();
+    if (blood.has(id)) continue;
+    blood.add(id);
+    const own = fam.unions.filter((u) => u.host === id || u.partner === id).map((u) => u.id);
+    own.forEach((uid) => unions.add(uid));
+    for (const p of fam.people) if (p.parent === id || own.includes(p.parent)) queue.push(p.id);
+  }
+  const shownUnions = fam.unions
+    .filter((u) => unions.has(u.id))
+    .map((u) => (blood.has(u.host) ? { ...u } : { ...u, host: u.partner, partner: u.host }));
+  const spouses = new Set(shownUnions.map((u) => u.partner).filter((id) => !blood.has(id)));
+  const people = fam.people
+    .filter((p) => blood.has(p.id) || spouses.has(p.id))
+    .map((p) => (p.id === rootId || spouses.has(p.id) ? { ...p, parent: null } : { ...p }));
+  return { ...fam, people, unions: shownUnions };
+}
+
+// Кровные предки человека, от ближнего к дальнему (у пары — тот, кто её держит).
+export function ancestorsOf(fam, personId) {
+  const list = [];
+  const seen = new Set([personId]);
+  let person = getPerson(fam, personId);
+  while (person && person.parent !== null) {
+    person = getPerson(fam, carrierOf(fam, person.parent));
+    if (!person || seen.has(person.id)) break;
+    seen.add(person.id);
+    list.push(person);
+  }
+  return list;
+}
+
 // --- кто смотрит ---
 // Главное дерево зависит от того, кто смотрит: в каждой паре ветку с детьми
 // держит тот из супругов, кто ближе смотрящему по крови, лиана тянется от
