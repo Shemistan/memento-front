@@ -2,8 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ROOT_ID } from '../src/model.js';
 import {
+  addParent,
   addPerson,
   addUnion,
+  canAddParent,
+  checks,
   childrenOf,
   createFamily,
   deserialize,
@@ -14,6 +17,7 @@ import {
   removeUnion,
   roots,
   serialize,
+  setDied,
   toFamilyText,
   toTree,
   unionsOf,
@@ -166,4 +170,81 @@ test('одинокий человек и пустые годы расклады�
   layout = familyLayout(fam);
   assert.equal(layout.nodes.size, 4);
   for (const n of layout.nodes.values()) assert.ok(Number.isFinite(n.x) && Number.isFinite(n.y));
+});
+
+// --- годы смерти, родители, проверки ---
+
+test('годы жизни в тексте: смерть с годом, без года, неизвестное рождение', () => {
+  const text = 'Николай 1926–1998\n  + Анна 1929–? (1950)\n    Пётр 1952\n    Ваня ?–2001';
+  const fam = parseFamily(text);
+  const [nik, anna, petr, vanya] = ['Николай', 'Анна', 'Пётр', 'Ваня'].map((n) => byName(fam, n));
+  assert.deepEqual([nik.dead, nik.died], [true, 1998]);
+  assert.deepEqual([anna.dead, anna.died], [true, null]);
+  assert.deepEqual([petr.dead, petr.died], [false, null]);
+  assert.deepEqual([vanya.born, vanya.died], [null, 2001]);
+  assert.equal(toFamilyText(fam), text);
+  const back = deserialize(serialize(fam));
+  assert.deepEqual([byName(back, 'Анна').dead, byName(back, 'Анна').died], [true, null]);
+});
+
+test('год смерти делает ушедшим, снятие отметки — живым', () => {
+  const fam = createFamily();
+  const p = addPerson(fam, { name: 'А', born: 1950 });
+  setDied(fam, p.id, { died: 2000 });
+  assert.deepEqual([p.dead, p.died], [true, 2000]);
+  setDied(fam, p.id, { dead: false });
+  assert.deepEqual([p.dead, p.died], [false, null]);
+});
+
+test('родитель у корня — новый предок, дерево остаётся главным', () => {
+  const fam = parseFamily(DEMO);
+  const nik = byName(fam, 'Николай');
+  const { parent } = addParent(fam, nik.id, { name: 'Прадед', born: 1900 });
+  assert.equal(nik.parent, parent.id);
+  assert.equal(roots(fam)[0], parent, 'новый корень стоит первым — главное дерево то же');
+  assert.equal(toTree(fam).nodes[0].name, 'Прадед');
+  const layout = familyLayout(fam);
+  assert.ok(layout.nodes.get(parent.id).y > layout.nodes.get(nik.id).y, 'предок ниже');
+});
+
+test('второй родитель превращает одного родителя в пару; третьего не бывает', () => {
+  const fam = createFamily();
+  const mom = addPerson(fam, { name: 'Мама', born: 1960 });
+  const kid = addPerson(fam, { name: 'Сын', born: 1985, parent: mom.id });
+  assert.ok(canAddParent(fam, kid.id));
+  const { parent, union } = addParent(fam, kid.id, { name: 'Папа' });
+  assert.equal(kid.parent, union.id);
+  assert.deepEqual([union.host, union.partner], [mom.id, parent.id]);
+  assert.ok(!canAddParent(fam, kid.id));
+  assert.throws(() => addParent(fam, kid.id), /Оба родителя/);
+});
+
+test('проверки ловят вероятные опечатки в годах', () => {
+  const fam = parseFamily('Отец 1950–1970\n  + Мать 1952 (1975)\n    Сын 1980\n  Дочь 1955\nОшибка 2000–1990');
+  const warn = checks(fam);
+  assert.match(warn.get(byName(fam, 'Сын').id).join(), /после смерти/);
+  assert.match(warn.get(byName(fam, 'Дочь').id).join(), /слишком молод/);
+  assert.match(warn.get(byName(fam, 'Ошибка').id).join(), /раньше года рождения/);
+  assert.match(warn.get(fam.unions[0].id).join(), /после смерти/);
+  assert.equal(warn.get(byName(fam, 'Мать').id), undefined);
+});
+
+test('редактор: ярусы поколений, карточки не накладываются', () => {
+  const fam = parseFamily(DEMO);
+  addPerson(fam, { name: 'Без пары', born: 1958, parent: byName(fam, 'Николай').id });
+  const W = 228;
+  const H = 104;
+  const layout = familyLayout(fam, { rows: 84, measure: () => W, nodeH: H, unionW: 168, unionH: 32, gap: 28 });
+  const box = (n) => (n.kind === 'union' ? { w: 168, h: 32 } : { w: W, h: H });
+  const list = [...layout.nodes.values()];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      const [a, b] = [list[i], list[j]];
+      const overlapX = Math.abs(a.x - b.x) < (box(a).w + box(b).w) / 2;
+      const overlapY = Math.abs(a.y - b.y) < (box(a).h + box(b).h) / 2;
+      assert.ok(!(overlapX && overlapY), `${a.id} и ${b.id} накладываются`);
+    }
+  }
+  const nik = layout.nodes.get(byName(fam, 'Николай').id);
+  assert.ok(layout.nodes.get(byName(fam, 'Пётр').id).y < nik.y, 'потомки на другом ярусе');
 });

@@ -49,7 +49,7 @@ const easeOut = (v) => 1 - (1 - v) ** 3;
 const near = (a, b) => Math.abs(a - b) < 0.05;
 const fx = (v) => v.toFixed(1);
 // По порядку пары в семье: соседние браки не совпадают по цвету.
-const vineColor = (fam, unionId) => VINE_COLORS[Math.max(0, fam.unions.findIndex((u) => u.id === unionId)) % VINE_COLORS.length];
+export const vineColor = (fam, unionId) => VINE_COLORS[Math.max(0, fam.unions.findIndex((u) => u.id === unionId)) % VINE_COLORS.length];
 
 // Лист в локальных координатах группы: s — точка из leafSpots/twigLeaves.
 function leaf(s) {
@@ -67,7 +67,7 @@ function upward(angle) {
 export function createFlatView(svg, { onSelect }) {
   const ctx = document.createElement('canvas').getContext('2d');
   ctx.font = FONT;
-  const measure = (text) => Math.max(64, Math.ceil(ctx.measureText(text).width + 30));
+  const measure = (person) => Math.max(64, Math.ceil(ctx.measureText(personLabel(person)).width + 30));
 
   const world = el('g', { class: 'flat-world' }, svg);
   const yearLayer = el('g', { class: 'flat-years' }, world);
@@ -96,7 +96,7 @@ export function createFlatView(svg, { onSelect }) {
   let lastArea = null;
 
   function makeItem(n, appear) {
-    const item = { kind: n.kind, appear, shown: null, twigs: [], tip: null, els: [] };
+    const item = { kind: n.kind, isRoot: n.parentId === null, appear, shown: null, twigs: [], tip: null, els: [] };
     const keep = (node) => {
       item.els.push(node);
       return node;
@@ -144,6 +144,10 @@ export function createFlatView(svg, { onSelect }) {
     item.node.setAttribute('aria-label', personLabel(person));
     item.rect.setAttribute('x', -n.width / 2);
     item.rect.setAttribute('width', n.width);
+    // У ушедших — осенние листья (если включено «Осень у ушедших»).
+    item.leaves.classList.toggle('is-gone', person.dead);
+    item.decorLeaves.classList.toggle('is-gone', person.dead);
+    item.node.classList.toggle('is-gone', person.dead);
     if (item.tip === tip && item.leafWidth === n.width) return;
     item.tip = tip;
     item.leafWidth = n.width;
@@ -194,8 +198,11 @@ export function createFlatView(svg, { onSelect }) {
     fam = family;
     relayout();
     const now = performance.now();
+    const reborn = new Map(); // корень стал ребёнком или наоборот: элементы другие, состояние то же
     for (const [id, item] of items) {
-      if (!regrow && layout.nodes.has(id) && item.kind === layout.nodes.get(id).kind) continue;
+      const n = layout.nodes.get(id);
+      if (!regrow && n && item.kind === n.kind && item.isRoot === (n.parentId === null)) continue;
+      if (!regrow && n && item.kind === n.kind) reborn.set(id, item);
       dropItem(item);
       items.delete(id);
     }
@@ -205,10 +212,11 @@ export function createFlatView(svg, { onSelect }) {
       depth.set(id, n.parentId ? depth.get(n.parentId) + 1 : 0);
       let item = items.get(id);
       if (!item) {
-        item = makeItem(n, regrow ? now + depth.get(id) * STAGGER_MS : now);
+        const old = reborn.get(id);
+        item = makeItem(n, old ? old.appear : regrow ? now + depth.get(id) * STAGGER_MS : now);
         // Новая ветка выходит из того места, где сейчас виден родитель.
         const parent = items.get(n.parentId)?.shown;
-        item.shown = parent && !regrow ? { ...parent } : { x: n.x, y: n.y, r: 0 };
+        item.shown = old ? old.shown : parent && !regrow ? { ...parent } : { x: n.x, y: n.y, r: 0 };
         items.set(id, item);
       }
       if (n.kind === 'person') fillPerson(item, n, getPerson(fam, id), !parents.has(id));
@@ -503,6 +511,7 @@ export function createFlatView(svg, { onSelect }) {
     // Узлы видны: таблички, пары и шкала лет на месте, веточки вне модели
     // приглушены. Скрыты: все ветки одинаковые — просто деревья с лианами.
     setNodes: (on) => svg.classList.toggle('show-nodes', on),
+    setAutumn: (on) => svg.classList.toggle('autumn', on),
     wake: () => {
       animating = true;
     },

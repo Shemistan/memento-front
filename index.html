@@ -9,6 +9,9 @@
 <body>
   <canvas id="scene" aria-label="Дерево"></canvas>
   <svg id="flat" class="flat" aria-label="Схема дерева" hidden></svg>
+  <main id="editor" class="editor" aria-label="Редактор семьи" hidden>
+    <p class="editor-hint">«+» над карточкой — родитель, «⚭ Пара» — супруг, «↓» — ребёнок. Enter — сохранить поле.</p>
+  </main>
   <div id="tooltip" class="tooltip" hidden></div>
   <div id="zoom" class="zoom" hidden>
     <button id="zoom-in" type="button" title="Приблизить" aria-label="Приблизить">+</button>
@@ -27,6 +30,7 @@
     <div class="segmented" role="radiogroup" aria-label="Вид дерева">
       <label><input type="radio" name="view" value="living" checked><span>Живое</span></label>
       <label><input type="radio" name="view" value="flat"><span>Схема 2D</span></label>
+      <label><input type="radio" name="view" value="editor"><span>Редактор</span></label>
     </div>
 
     <section class="panel__section switches">
@@ -34,14 +38,23 @@
       <label class="switch" data-view="living"><input id="labels-toggle" type="checkbox"><span></span>Подписи</label>
       <label class="switch" data-view="living"><input id="wind-toggle" type="checkbox" checked><span></span>Ветер</label>
       <label class="switch" data-view="flat"><input id="nodes-toggle" type="checkbox" checked><span></span>Показать узлы</label>
+      <label class="switch" data-view="flat"><input id="autumn-toggle" type="checkbox" checked><span></span>Осень у ушедших</label>
     </section>
 
     <section class="panel__section">
       <h2 id="sel-title">Выбран человек</h2>
-      <form id="person-form" class="row">
-        <input id="person-name" type="text" maxlength="60" aria-label="Имя">
-        <input id="person-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения">
-        <button type="submit" class="ghost">Сохранить</button>
+      <form id="person-form">
+        <div class="row">
+          <input id="person-name" type="text" maxlength="60" aria-label="Имя">
+          <button type="submit" class="ghost">Сохранить</button>
+        </div>
+        <div class="row">
+          <input id="person-born" class="year" type="number" min="1" max="2999" placeholder="Рожд." aria-label="Год рождения">
+          <span class="muted">–</span>
+          <input id="person-died" class="year" type="number" min="1" max="2999" placeholder="Смерть" aria-label="Год смерти">
+          <label class="check"><input id="person-dead" type="checkbox"> нет в живых</label>
+        </div>
+        <p id="person-warn" class="warn" hidden></p>
       </form>
       <div id="union-box" hidden>
         <p id="union-names" class="pair-names"></p>
@@ -75,6 +88,7 @@
         </form>
       </details>
       <div class="row row--split">
+        <button id="parent-btn" type="button" class="ghost">↑ Родитель</button>
         <button id="remove-btn" type="button" class="danger">Удалить</button>
         <span id="stats" class="muted"></span>
       </div>
