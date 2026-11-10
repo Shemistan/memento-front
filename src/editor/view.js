@@ -5,15 +5,19 @@ import {
   addParent,
   addPerson,
   addUnion,
+  ancestorsOf,
+  branchFamily,
   canAddParent,
   checks,
   getPerson,
   getUnion,
   isOutsidePartner,
   isUnionId,
+  lifeText,
   removePerson,
   removeUnion,
   renamePerson,
+  roots,
   setBorn,
   formatDate,
   parentOptions,
@@ -33,6 +37,10 @@ const ROWS = 84; // ярус: человек → пара → дети
 const BESIDE_GAP = 20; // между человеком и его супругом «со стороны»
 const PAD = 48;
 const NS = 'http://www.w3.org/2000/svg';
+export const MIN_SCALE = 0.03; // семья в 200+ человек шириной под 30 000 px
+export const MAX_SCALE = 1.5;
+const FAR = 0.55; // мельче — на карточках остаются только фото и крупное имя
+const clampScale = (s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, Number.isFinite(s) ? s : 1));
 
 
 function html(tag, attrs = {}, children = []) {
@@ -70,6 +78,7 @@ function personCard(id) {
     html('div', { class: 'ecard__actions' }, [
       html('button', { type: 'button', 'data-act': 'pair', title: 'Добавить супруга', text: '⚭ Пара' }),
       html('button', { type: 'button', 'data-act': 'child', title: 'Ребёнок без пары', text: '↓ Ребёнок' }),
+      html('button', { type: 'button', 'data-act': 'branch', title: 'Редактировать ветку от этого человека', 'aria-label': 'Ветка от этого человека', text: '⤢' }),
       html('button', { type: 'button', class: 'ecard__remove', 'data-act': 'remove', title: 'Удалить', 'aria-label': 'Удалить', text: '✕' }),
     ]),
     html('span', { class: 'ecard__warn', text: '!', hidden: '' }),
@@ -102,21 +111,42 @@ function setValue(input, value) {
 }
 
 // act(change) — применить правку к семье; onPhoto(id, file) — загрузить фото;
-// photoOf(person) — адрес загруженного портрета или null.
-export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => null }) {
+// photoOf(person) — адрес загруженного портрета или null; view — начальные
+// { branch, scale }, onView(view) — их запомнить.
+export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => null, view = {}, onView = () => {} }) {
+  const crumbs = html('nav', { class: 'editor-crumbs', 'aria-label': 'Ветка' });
+  const bar = html('div', { class: 'editor-bar' }, [crumbs]);
+  const hint = root.querySelector('.editor-hint');
+  if (hint) bar.append(hint);
   const world = html('div', { class: 'editor-world' });
+  const sizer = html('div', { class: 'editor-sizer' }, [world]);
   const links = document.createElementNS(NS, 'svg');
   links.setAttribute('class', 'editor-links');
   world.append(links);
-  root.append(world);
+  root.prepend(bar);
+  root.append(sizer);
+  const picker = createPicker();
+  root.append(picker.node);
 
   const cards = new Map();
-  let fam = null;
+  let full = null; // вся семья
+  let fam = null; // то, что видно: вся семья или ветка
   let selectedId = null;
+  let branchId = view.branch ?? null;
+  let scale = clampScale(view.scale);
+  let size = { width: 0, height: 0 };
+
+  const remember = () => onView({ branch: branchId, scale });
 
   function render(family, selected = selectedId) {
-    fam = family;
+    full = family;
     selectedId = selected;
+    if (branchId && !getPerson(full, branchId)) {
+      branchId = null;
+      remember();
+    }
+    fam = branchId ? branchFamily(full, branchId) : full;
+    renderCrumbs();
     // Супруги «со стороны» стоят в одном ряду со своим супругом, справа от него:
     // раскладка считает их пару одним широким узлом.
     const outside = new Set(fam.people.filter((p) => isOutsidePartner(fam, p)).map((p) => p.id));
@@ -150,10 +180,12 @@ export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => nul
     }
     const width = b.maxX - b.minX + PAD * 2;
     const height = maxY - minY + CARD_H + PAD * 2;
+    size = { width, height };
     world.style.width = `${width}px`;
     world.style.height = `${height}px`;
     links.setAttribute('width', width);
     links.setAttribute('height', height);
+    applyScale();
 
     for (const [id, card] of cards) {
       if (!boxes.has(id)) {
@@ -199,6 +231,7 @@ export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => nul
     const up = card.querySelector('[data-act="parent"]');
     up.hidden = !canAddParent(fam, person.id);
     up.title = person.parent === null ? 'Добавить родителя' : 'Добавить второго родителя';
+    card.querySelector('[data-act="branch"]').hidden = person.id === branchId;
     card.setAttribute('aria-label', person.name);
   }
 
@@ -286,17 +319,267 @@ export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => nul
     for (const [key, card] of cards) card.classList.toggle('is-selected', key === id);
   }
 
+  // --- ветка: редактировать часть семьи от одного человека ---
+
+  function setBranch(id) {
+    branchId = id && getPerson(full, id) ? id : null;
+    remember();
+    render(full);
+    const card = cards.get(branchId ?? mainRootCard());
+    card?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  }
+
+  const mainRootCard = () => roots(fam).find((p) => cards.has(p.id))?.id;
+
+  function renderCrumbs() {
+    const all = html('button', { type: 'button', 'data-branch': '', text: 'Вся семья' });
+    if (!branchId) {
+      all.setAttribute('aria-current', 'true');
+      crumbs.replaceChildren(all, html('span', { class: 'muted', text: '⤢ на карточке — работать только с веткой человека' }));
+      return;
+    }
+    const path = ancestorsOf(full, branchId).reverse();
+    const sep = () => html('span', { class: 'editor-crumbs__sep', 'aria-hidden': 'true', text: '›' });
+    const items = [all];
+    for (const p of path) items.push(sep(), html('button', { type: 'button', 'data-branch': p.id, title: 'Ветка от этого человека', text: p.name }));
+    items.push(sep(), html('b', { 'aria-current': 'true', text: getPerson(full, branchId).name }));
+    crumbs.replaceChildren(...items);
+  }
+
+  crumbs.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-branch]');
+    if (btn) setBranch(btn.dataset.branch || null);
+  });
+
+  // --- масштаб: кнопки, Ctrl/⌘ + колесо, щипок на тачпаде ---
+
+  function applyScale() {
+    sizer.style.width = `${size.width * scale}px`;
+    sizer.style.height = `${size.height * scale}px`;
+    world.style.transform = `scale(${scale})`;
+    root.classList.toggle('is-far', scale < FAR);
+  }
+
+  // Точка (x, y) экрана редактора остаётся на месте.
+  function zoomAt(factor, x = root.clientWidth / 2, y = root.clientHeight / 2) {
+    const next = clampScale(scale * factor);
+    if (next === scale) return;
+    const wx = (root.scrollLeft + x - sizer.offsetLeft) / scale;
+    const wy = (root.scrollTop + y - sizer.offsetTop) / scale;
+    scale = next;
+    applyScale();
+    root.scrollLeft = wx * scale + sizer.offsetLeft - x;
+    root.scrollTop = wy * scale + sizer.offsetTop - y;
+    remember();
+  }
+
+  // Вся видимая семья на экране (крупнее 1 не делаем).
+  function fit() {
+    const w = root.clientWidth - 32;
+    const h = root.clientHeight - bar.offsetHeight - 32;
+    if (w <= 0 || h <= 0 || !size.width) return;
+    scale = clampScale(Math.min(1, w / size.width, h / size.height));
+    applyScale();
+    root.scrollTo(0, 0);
+    remember();
+  }
+
+  const local = (e) => {
+    const r = root.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+
+  root.addEventListener(
+    'wheel',
+    (e) => {
+      if (!e.ctrlKey && !e.metaKey) return; // обычное колесо и тачпад — прокрутка
+      e.preventDefault();
+      zoomAt(Math.exp(-Math.max(-60, Math.min(60, e.deltaY)) * 0.01), ...local(e));
+    },
+    { passive: false },
+  );
+  // Safari: щипок приходит жестами, а не колесом.
+  let gestureFrom = 1;
+  root.addEventListener('gesturestart', (e) => {
+    e.preventDefault();
+    gestureFrom = scale;
+  });
+  root.addEventListener('gesturechange', (e) => {
+    e.preventDefault();
+    zoomAt((gestureFrom * e.scale) / scale, ...local(e));
+  });
+
+  // Перетаскивание за пустое место.
+  let drag = null;
+  root.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || e.pointerType === 'touch' || e.target.closest('.ecard, .eunion, .editor-bar, .epicker')) return;
+    if (e.target === root && (e.offsetX >= root.clientWidth || e.offsetY >= root.clientHeight)) return; // полоса прокрутки
+    drag = { x: e.clientX, y: e.clientY, left: root.scrollLeft, top: root.scrollTop, id: e.pointerId };
+    root.setPointerCapture?.(e.pointerId);
+    root.classList.add('is-dragging');
+  });
+  root.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    root.scrollLeft = drag.left - (e.clientX - drag.x);
+    root.scrollTop = drag.top - (e.clientY - drag.y);
+  });
+  const endDrag = () => {
+    drag = null;
+    root.classList.remove('is-dragging');
+  };
+  root.addEventListener('pointerup', endDrag);
+  root.addEventListener('pointercancel', endDrag);
+
+  // --- супруг: новый или любой из семьи ---
+
+  // Выбор человека: деревья → дети → внуки…, или поиск по имени.
+  function createPicker() {
+    const title = html('b', { class: 'epicker__title' });
+    const close = html('button', { type: 'button', class: 'ghost', 'data-pick-close': '', 'aria-label': 'Закрыть', text: '✕' });
+    const fresh = html('button', { type: 'button', class: 'primary', 'data-pick-new': '', text: '+ Новый человек' });
+    const search = html('input', { type: 'search', class: 'epicker__search', placeholder: 'Найти по имени', 'aria-label': 'Найти по имени' });
+    const path = html('nav', { class: 'editor-crumbs epicker__path' });
+    const list = html('ul', { class: 'epicker__list' });
+    const error = html('p', { class: 'error', hidden: '' });
+    const box = html('div', { class: 'epicker__box', role: 'dialog', 'aria-modal': 'true' }, [
+      html('header', { class: 'epicker__head' }, [title, close]),
+      fresh,
+      html('p', { class: 'muted', text: 'Или выберите из семьи: откройте дерево и спускайтесь к нужному человеку.' }),
+      search,
+      path,
+      list,
+      error,
+    ]);
+    const node = html('div', { class: 'epicker', hidden: '' }, [box]);
+    let forId = null;
+    let level = null; // чьих детей показываем; null — все деревья
+
+    const label = (p) => {
+      const life = lifeText(p);
+      return life ? `${p.name} · ${life}` : p.name;
+    };
+    // Дети человека — и свои, и от любой его пары.
+    const kids = (id) => {
+      const own = full.unions.filter((u) => u.host === id || u.partner === id).map((u) => u.id);
+      return full.people.filter((p) => p.parent === id || own.includes(p.parent));
+    };
+    const paired = (id) => full.unions.some((u) => (u.host === forId && u.partner === id) || (u.host === id && u.partner === forId));
+
+    function row(person, { self = false } = {}) {
+      const pick = html('button', { type: 'button', class: 'epicker__pick', 'data-pick': person.id, text: self ? `Выбрать: ${label(person)}` : label(person) });
+      if (person.id === forId || paired(person.id)) {
+        pick.disabled = true;
+        pick.title = person.id === forId ? 'Это сам человек' : 'Уже пара';
+      }
+      const parent = ancestorsOf(full, person.id)[0];
+      const items = [pick];
+      if (search.value.trim() && parent) items.push(html('span', { class: 'muted', text: `у ${parent.name}` }));
+      if (!self && kids(person.id).length) {
+        items.push(html('button', { type: 'button', class: 'epicker__open', 'data-open': person.id, title: 'Дети', 'aria-label': `Дети: ${person.name}`, text: '›' }));
+      }
+      return html('li', { class: self ? 'is-self' : '' }, items);
+    }
+
+    function draw() {
+      error.hidden = true;
+      const query = search.value.trim().toLowerCase();
+      path.hidden = Boolean(query);
+      if (query) {
+        const found = full.people.filter((p) => p.name.toLowerCase().includes(query)).slice(0, 60);
+        list.replaceChildren(...found.map((p) => row(p)));
+        if (!found.length) list.replaceChildren(html('li', { class: 'muted', text: 'Никого не нашлось' }));
+        return;
+      }
+      const items = [html('button', { type: 'button', 'data-open': '', text: 'Все деревья' })];
+      if (level) {
+        for (const p of [...ancestorsOf(full, level).reverse(), getPerson(full, level)]) {
+          items.push(html('span', { class: 'editor-crumbs__sep', 'aria-hidden': 'true', text: '›' }), html('button', { type: 'button', 'data-open': p.id, text: p.name }));
+        }
+      }
+      path.replaceChildren(...items);
+      // Деревья — люди без родителей, кроме супругов «со стороны».
+      const people = level ? kids(level) : roots(full).filter((p) => !isOutsidePartner(full, p));
+      list.replaceChildren(...(level ? [row(getPerson(full, level), { self: true })] : []), ...people.map((p) => row(p)));
+    }
+
+    function open(id) {
+      forId = id;
+      level = null;
+      search.value = '';
+      title.textContent = `Пара для «${getPerson(full, id).name}»`;
+      node.hidden = false;
+      draw();
+      search.focus();
+    }
+    const hide = () => {
+      node.hidden = true;
+      forId = null;
+    };
+
+    // fresh — новый человек: сразу печатать имя; иначе только показать карточку.
+    function choose(change, { fresh = false } = {}) {
+      const id = forId;
+      try {
+        const created = act((f) => change(f, id));
+        hide();
+        onSelect(created);
+        if (fresh) focus(created);
+        else cards.get(created)?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      } catch (err) {
+        error.textContent = err.message;
+        error.hidden = false;
+      }
+    }
+
+    search.addEventListener('input', draw);
+    node.addEventListener('click', (e) => {
+      if (e.target === node || e.target.closest('[data-pick-close]')) return hide();
+      if (e.target.closest('[data-pick-new]')) {
+        return choose((f, id) => {
+          const partner = addPerson(f, { added: Date.now() });
+          addUnion(f, id, partner.id);
+          return partner.id;
+        }, { fresh: true });
+      }
+      const opener = e.target.closest('[data-open]');
+      if (opener) {
+        level = opener.dataset.open || null;
+        search.value = '';
+        draw();
+        return;
+      }
+      const pick = e.target.closest('[data-pick]');
+      if (pick) {
+        const partner = pick.dataset.pick;
+        choose((f, id) => {
+          addUnion(f, id, partner);
+          return partner;
+        });
+      }
+    });
+    node.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hide();
+    });
+    return { node, open, hide };
+  }
+
   // --- действия ---
 
   const actions = {
-    parent: (id) => act((f) => addParent(f, id).parent.id),
+    parent: (id) => {
+      const created = act((f) => addParent(f, id).parent.id);
+      if (id === branchId) setBranch(created); // новый предок ветки — ветка растёт вверх
+      return created;
+    },
     child: (id) => act((f) => addPerson(f, { parent: id, added: Date.now() }).id),
-    pair: (id) =>
-      act((f) => {
-        const partner = addPerson(f, { added: Date.now() });
-        addUnion(f, id, partner.id);
-        return partner.id;
-      }),
+    pair: (id) => {
+      picker.open(id);
+      return null;
+    },
+    branch: (id) => {
+      setBranch(id);
+      return null;
+    },
     remove: (id) => {
       if (isUnionId(id)) {
         act((f) => removeUnion(f, id));
@@ -391,5 +674,5 @@ export function createEditor(root, { act, onSelect, onPhoto, photoOf = () => nul
     e.target.blur();
   });
 
-  return { render, focus, setSelected };
+  return { render, focus, setSelected, setBranch, zoom: (factor) => zoomAt(factor), fit };
 }

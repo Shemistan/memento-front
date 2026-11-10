@@ -33,6 +33,8 @@ import {
   editAsSeen,
   mainRoot,
   viewFrom,
+  branchFamily,
+  ancestorsOf,
 } from '../src/family/model.js';
 import { GAP, MIN_DY, familyLayout } from '../src/flat/family-layout.js';
 
@@ -385,4 +387,26 @@ test('расстояния по крови идут через обоих род
   assert.equal(dist.get(id('Я')), 3);
   assert.equal(dist.get(id('Папа')), 4);
   assert.equal(dist.get(id('Дед')), 5);
+});
+
+test('ветка от человека: потомки и их супруги без своей родни', () => {
+  const fam = parseFamily(SIDES);
+  const id = (name) => fam.people.find((p) => p.name === name).id;
+  const names = (f) => f.people.map((p) => p.name).sort();
+
+  const grandma = branchFamily(fam, id('Бабушка'));
+  assert.deepEqual(names(grandma), ['Бабушка', 'Мама', 'Папа', 'Тётя', 'Я']);
+  assert.equal(getPerson(grandma, id('Папа')).parent, null, 'супруг — без своей родни');
+  assert.equal(grandma.unions[0].host, id('Мама'), 'пара развёрнута к крови ветки');
+  assert.equal(getPerson(grandma, id('Я')).parent, grandma.unions[0].id);
+  assert.equal(fam.unions[0].host, id('Папа'), 'семья не меняется');
+  assert.ok(familyLayout(grandma).nodes.has(id('Я')));
+
+  const dad = branchFamily(fam, id('Папа'));
+  assert.deepEqual(names(dad), ['Мама', 'Папа', 'Я']);
+  assert.equal(getPerson(dad, id('Папа')).parent, null, 'корень ветки — без родителей');
+  assert.equal(branchFamily(fam, 'p999'), null);
+
+  assert.deepEqual(ancestorsOf(fam, id('Я')).map((p) => p.name), ['Папа', 'Дед']);
+  assert.deepEqual(ancestorsOf(fam, id('Дед')), []);
 });

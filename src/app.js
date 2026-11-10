@@ -153,7 +153,18 @@ let windAmount = state.wind ? 1 : 0;
 const renderer = createRenderer(els.canvas);
 const photoOf = (person) => cachedPhoto(person.photo);
 const flat = createFlatView(els.flat, { onSelect: select, photoOf });
-const editor = createEditor(els.editor, { act: edit, onSelect: select, onPhoto: uploadPhoto, photoOf });
+const editor = createEditor(els.editor, {
+  act: edit,
+  onSelect: select,
+  onPhoto: uploadPhoto,
+  photoOf,
+  view: { branch: state.editorBranch, scale: state.editorScale },
+  onView: ({ branch, scale }) => {
+    state.editorBranch = branch;
+    state.editorScale = scale;
+    saveState();
+  },
+});
 
 // Фото: сжать до портрета, положить в хранилище, старое удалить.
 async function uploadPhoto(id, file) {
@@ -211,7 +222,7 @@ function exists(id) {
 function loadState() {
   // source — savedAt опубликованной версии, от которой идёт семья в этом
   // браузере; dirty — с тех пор её правили здесь.
-  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true, density: 1, viewer: null, source: null, dirty: false };
+  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true, density: 1, viewer: null, source: null, dirty: false, editorBranch: null, editorScale: 1 };
   const demo = () => {
     const fam = parseFamily(DEMO);
     return { ...settings, fam, selectedId: roots(fam)[0].id };
@@ -241,6 +252,8 @@ function loadState() {
       viewer: getPerson(fam, data.viewer) ? data.viewer : null,
       source: typeof data.source === 'string' ? data.source : null,
       dirty: Boolean(data.dirty),
+      editorBranch: getPerson(fam, data.editorBranch) ? data.editorBranch : null,
+      editorScale: Number.isFinite(data.editorScale) ? data.editorScale : 1,
     };
   } catch {
     return demo();
@@ -264,6 +277,8 @@ function saveState() {
         viewer: state.viewer,
         source: state.source,
         dirty: state.dirty,
+        editorBranch: state.editorBranch,
+        editorScale: state.editorScale,
       }),
     );
   } catch {
@@ -313,6 +328,7 @@ function replaceFamily(fam, { touched = true } = {}) {
   state.viewer = viewerIn(fam);
   state.fam = fam;
   state.selectedId = mainRoot(viewFrom(fam, state.viewer))?.id ?? roots(fam)[0].id;
+  editor.setBranch(null); // в новой семье те же id могут быть у других людей
   familyChanged({ regrow: true, touched });
   loadPhotos({ prune: true });
 }
@@ -667,7 +683,7 @@ function applyView() {
   els.canvas.hidden = state.view !== 'living';
   els.editor.hidden = state.view !== 'editor';
   els.flat.toggleAttribute('hidden', !isFlat); // у SVG нет свойства hidden
-  els.zoom.hidden = !isFlat;
+  els.zoom.hidden = state.view === 'living';
   els.tooltip.hidden = true;
   hoverId = null;
   for (const radio of document.querySelectorAll('input[name="view"]')) radio.checked = radio.value === state.view;
@@ -682,9 +698,11 @@ for (const radio of document.querySelectorAll('input[name="view"]')) {
   });
 }
 
-els.zoomIn.addEventListener('click', () => flat.zoom(1.25));
-els.zoomOut.addEventListener('click', () => flat.zoom(0.8));
-els.zoomFit.addEventListener('click', () => flat.fit());
+// Кнопки масштаба общие у схемы и редактора.
+const zoomTarget = () => (state.view === 'editor' ? editor : flat);
+els.zoomIn.addEventListener('click', () => zoomTarget().zoom(1.25));
+els.zoomOut.addEventListener('click', () => zoomTarget().zoom(0.8));
+els.zoomFit.addEventListener('click', () => zoomTarget().fit());
 
 els.reset.addEventListener('click', () => {
   state.viewer = null;
