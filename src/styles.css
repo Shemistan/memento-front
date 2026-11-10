@@ -12,6 +12,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -183,6 +184,21 @@ body:not([data-view="flat"]) [data-view="flat"] { display: none; }
    прячем лист через scale(0), а показываем, сняв правило. */
 .flat.no-leaves .flat-leaf { transform: scale(0); opacity: 0; }
 
+/* Лианы пар: цвет задаётся атрибутом stroke — у каждой пары свой. */
+.flat-vine { fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.flat-vine--wrap { stroke-width: 2.1; }
+.flat-union { stroke: #fffaf0; stroke-width: 2; transition: stroke 0.15s, stroke-width 0.15s; }
+.flat-ring { fill: none; stroke: #fffaf0; stroke-width: 1.6; }
+.flat-union-year { fill: var(--ink); font: 600 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; pointer-events: none; }
+.flat-node--union:hover .flat-union { stroke: var(--accent); }
+.flat-node--union.is-selected .flat-union { stroke: var(--select); stroke-width: 4; }
+
+/* Шкала лет — только в режиме узлов. */
+.flat-years { transition: opacity 0.4s; }
+.flat-years line { stroke: rgba(60, 45, 25, 0.14); stroke-width: 1; stroke-dasharray: 3 6; }
+.flat-years text { fill: var(--muted); font: 600 11px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+.flat:not(.show-nodes) .flat-years { opacity: 0; }
+
 .flat-node { cursor: pointer; outline: none; transition: opacity 0.3s; }
 .flat:not(.show-nodes) .flat-node { opacity: 0; pointer-events: none; }
 .flat-node rect { fill: #fffaf0; stroke: #8a6a48; stroke-width: 1.4; transition: fill 0.15s, stroke 0.15s; }
@@ -195,6 +211,25 @@ body:not([data-view="flat"]) [data-view="flat"] { display: none; }
 .zoom[hidden] { display: none; }
 .zoom button { min-width: 38px; background: var(--panel-bg); border-color: var(--line); color: var(--ink); box-shadow: 0 4px 16px rgba(40, 50, 30, 0.16); }
 .zoom button:hover { background: #fff; }
+
+.year { flex: 0 0 76px; width: 76px; }
+select {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+.hint { margin-top: 6px; font-size: 12px; }
+.hint:empty { display: none; }
+.pair-names { margin: 0 0 8px; font-weight: 700; }
+.pair-box { margin-top: 10px; }
+.pair-box summary { margin-bottom: 8px; }
+.branch-list .is-union { color: #8a3f62; font-weight: 600; }
+#tree-form { margin-top: 10px; }
 
 .panel-toggle { display: none; }
 

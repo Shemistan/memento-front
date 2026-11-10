@@ -1,109 +1,12 @@
-// Схема 2D: раскладка дерева по поколениям и геометрия веток.
-// Чистые функции без DOM — фундамент будущего генеалогического дерева:
-// поколение = ярус, порядок детей сохраняется, поддеревья не пересекаются.
-import { ROOT_ID } from '../model.js';
+// Схема 2D: геометрия веток, ствола, корней, листьев и лиан. Чистые функции
+// без DOM; раскладка семьи — в family-layout.js.
 import { hashString, rng } from '../layout.js';
 
-export const ROW = 128; // расстояние между поколениями
-export const GAP = 16; // минимальный зазор между соседями-сиблингами
 export const NODE_H = 30; // высота таблички с именем
-const CHAR_W = 7.6;
-const PAD = 30;
+export const TWIG_UNIT = 100; // длина веточки при len = 1
 const MIN_W = 64;
 const BARK_K = 2.6; // полутолщина = BARK_K * sqrt(число кончиков) — модель «трубок»
 const TIP_R = 2.2;
-
-export function estimateWidth(name) {
-  return Math.max(MIN_W, Math.round(String(name).length * CHAR_W + PAD));
-}
-
-// Зазор растёт с глубиной различия: двоюродные стоят дальше родных.
-const sepAt = (gap, d) => (d === 0 ? gap : gap * 1.6);
-
-// Укладывает поддеревья слева направо; contour[d] = { l, r } — края яруса d
-// относительно корня поддерева. Возвращает смещения корней.
-function pack(subs, gap) {
-  const xs = [];
-  const edge = [];
-  for (const sub of subs) {
-    let x = 0;
-    if (xs.length) {
-      x = -Infinity;
-      for (let d = 0; d < Math.min(sub.length, edge.length); d++) {
-        x = Math.max(x, edge[d] - sub[d].l + sepAt(gap, d));
-      }
-    }
-    sub.forEach((lvl, d) => {
-      edge[d] = d < edge.length ? Math.max(edge[d], lvl.r + x) : lvl.r + x;
-    });
-    xs.push(x);
-  }
-  return xs;
-}
-
-const mirror = (contour) => contour.map(({ l, r }) => ({ l: -r, r: -l }));
-const centered = (xs) => {
-  const mid = (xs[0] + xs[xs.length - 1]) / 2;
-  return xs.map((x) => x - mid);
-};
-
-// Reingold–Tilford с усреднением укладок слева и справа: маленькие поддеревья
-// между крупными не прижимаются к одному краю. Оба варианта удовлетворяют
-// линейным ограничениям на зазоры, значит и их среднее — тоже.
-export function layoutTree(tree, { measure = estimateWidth, row = ROW, gap = GAP } = {}) {
-  const kids = new Map(tree.nodes.map((n) => [n.id, []]));
-  for (const n of tree.nodes) if (n.parentId && kids.has(n.parentId)) kids.get(n.parentId).push(n.id);
-  const byId = new Map(tree.nodes.map((n) => [n.id, n]));
-  const width = new Map(tree.nodes.map((n) => [n.id, measure(n.name)]));
-  const offset = new Map([[ROOT_ID, 0]]);
-  const tips = new Map();
-
-  const place = (id) => {
-    const w = width.get(id);
-    const own = { l: -w / 2, r: w / 2 };
-    const ch = kids.get(id);
-    if (!ch.length) {
-      tips.set(id, 1);
-      return [own];
-    }
-    const subs = ch.map(place);
-    const ltr = centered(pack(subs, gap));
-    const rtl = centered(pack([...subs].reverse().map(mirror), gap).map((x) => -x).reverse());
-    const xs = ltr.map((x, i) => (x + rtl[i]) / 2);
-    ch.forEach((c, i) => offset.set(c, xs[i]));
-    tips.set(id, ch.reduce((s, c) => s + tips.get(c), 0));
-
-    const contour = [own];
-    subs.forEach((sub, i) =>
-      sub.forEach(({ l, r }, d) => {
-        const lvl = contour[d + 1];
-        if (!lvl) contour[d + 1] = { l: l + xs[i], r: r + xs[i] };
-        else {
-          lvl.l = Math.min(lvl.l, l + xs[i]);
-          lvl.r = Math.max(lvl.r, r + xs[i]);
-        }
-      }),
-    );
-    return contour;
-  };
-  place(ROOT_ID);
-
-  const nodes = new Map();
-  const order = [];
-  const bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-  const walk = (id, x, depth) => {
-    const node = { id, parentId: byId.get(id).parentId, x, y: -depth * row + 0, depth, width: width.get(id), tips: tips.get(id) };
-    nodes.set(id, node);
-    order.push(id);
-    bounds.minX = Math.min(bounds.minX, x - node.width / 2);
-    bounds.maxX = Math.max(bounds.maxX, x + node.width / 2);
-    bounds.minY = Math.min(bounds.minY, node.y - NODE_H / 2);
-    bounds.maxY = Math.max(bounds.maxY, node.y + NODE_H / 2);
-    for (const c of kids.get(id)) walk(c, x + offset.get(c), depth + 1);
-  };
-  walk(ROOT_ID, 0, 0);
-  return { nodes, order, bounds, row };
-}
 
 export const barkRadius = (tipCount) => BARK_K * Math.sqrt(tipCount) + TIP_R;
 
@@ -277,4 +180,47 @@ export function leafSpots(id, { tip = false, width = MIN_W } = {}) {
     });
   }
   return spots;
+}
+
+const polyline = (pts) => `M${pts.map((p) => `${fmt(p.x)} ${fmt(p.y)}`).join('L')}`;
+
+// Лиана от супруга к узлу пары: поднимается от супруга, дугой уходит к паре
+// и подходит к ней снизу. upTo < 1 — лиана ещё растёт. Возвращает d и точки.
+export function vineCurve(from, to) {
+  const lift = Math.max(40, Math.abs(to.y - from.y) * 0.5);
+  const p1 = { x: from.x, y: from.y - lift };
+  const p2 = { x: to.x + (from.x - to.x) * 0.15, y: to.y + Math.max(30, lift * 0.4) };
+  return (t) => cubic(from, p1, p2, to, t);
+}
+
+export function vinePath(at, upTo = 1, { wave = 4, steps = 40 } = {}) {
+  const pts = [];
+  const n = Math.max(1, Math.round(steps * upTo));
+  for (let i = 0; i <= n; i++) {
+    const t = (i / n) * upTo;
+    const p = at(t);
+    const a = curveAngle(at, t);
+    const w = Math.sin(t * Math.PI * 7) * wave;
+    pts.push({ x: p.x - Math.sin(a) * w, y: p.y + Math.cos(a) * w });
+  }
+  return polyline(pts);
+}
+
+// Лиана, обвивающая ветку ребёнка пары: волна вокруг оси ветки с амплитудой
+// чуть больше её толщины radius(t). Виток ~ каждые 34px.
+export function wrapPath(at, radius, upTo = 1, phase = 0) {
+  const a = at(0);
+  const b = at(1);
+  const turns = Math.max(1.5, Math.hypot(b.x - a.x, b.y - a.y) / 34);
+  const steps = Math.ceil(turns * 10);
+  const pts = [];
+  const n = Math.max(1, Math.round(steps * upTo));
+  for (let i = 0; i <= n; i++) {
+    const t = (i / n) * upTo;
+    const p = at(t);
+    const ang = curveAngle(at, t);
+    const w = Math.sin(t * turns * Math.PI * 2 + phase) * (radius(t) + 1.6);
+    pts.push({ x: p.x - Math.sin(ang) * w, y: p.y + Math.cos(ang) * w });
+  }
+  return polyline(pts);
 }
