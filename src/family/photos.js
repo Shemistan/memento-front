@@ -1,6 +1,8 @@
 // Портреты людей. Картинки не помещаются в localStorage, поэтому лежат в
 // IndexedDB браузера; в модели у человека только id фото. Загруженное фото
 // ужимается до квадратного портрета PORTRAIT px в JPEG (~20–40 КБ).
+import { PHOTO_ID } from './bundle.js';
+
 const DB_NAME = 'memento-photos';
 const STORE = 'photos';
 export const PORTRAIT = 256;
@@ -58,12 +60,38 @@ export async function savePhoto(blob) {
   return id;
 }
 
+// Кладёт фото под заданным id (из файла семьи или с сервера).
+export async function putPhoto(id, blob) {
+  await run('readwrite', (store) => store.put(blob, id));
+  const old = urls.get(id);
+  if (old) URL.revokeObjectURL(old);
+  urls.set(id, URL.createObjectURL(blob));
+}
+
+export async function photoBlob(id) {
+  return (await run('readonly', (store) => store.get(id))) ?? null;
+}
+
+// Фото опубликованной семьи лежат на сервере: берём оттуда то, чего ещё нет.
+async function fetchPhoto(id) {
+  if (!PHOTO_ID.test(id) || typeof fetch !== 'function') return null;
+  try {
+    const res = await fetch(`api/photos/${id}`);
+    if (!res.ok || res.headers.get('content-type') !== 'image/jpeg') return null;
+    const blob = await res.blob();
+    await putPhoto(id, blob);
+    return urls.get(id);
+  } catch {
+    return null;
+  }
+}
+
 // Загружает фото в кэш; потом его адрес отдаёт cachedPhoto без ожидания.
 export async function loadPhoto(id) {
   if (!id) return null;
   if (urls.has(id)) return urls.get(id);
   const blob = await run('readonly', (store) => store.get(id));
-  if (!blob) return null;
+  if (!blob) return fetchPhoto(id);
   const url = URL.createObjectURL(blob);
   urls.set(id, url);
   return url;

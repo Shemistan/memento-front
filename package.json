@@ -6,6 +6,7 @@
   "description": "Живое дерево: ветки растут на глазах, листья включаются и выключаются",
   "scripts": {
     "start": "node scripts/serve.js",
-    "test": "node --test test/"
+    "test": "node --test test/",
+    "admin": "node scripts/admin.js"
   }
 }
