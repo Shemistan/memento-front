@@ -1,7 +1,7 @@
 // Схема 2D: раскладка семьи. Чистые функции без DOM.
 // Высота узла — год (кто родился раньше, стоит ниже), горизонталь —
 // Reingold–Tilford по полосам высоты, деревья разных корней — лес.
-import { childrenOf, getPerson, getUnion, isUnionId, roots, unionsOf } from '../family/model.js';
+import { childrenOf, getPerson, getUnion, isUnionId, lifeText, roots, unionsOf } from '../family/model.js';
 import { NODE_H, barkRadius } from './layout.js';
 
 export const UNION_W = 26; // диаметр значка пары
@@ -16,7 +16,7 @@ const CHAR_W = 7.6;
 const PAD = 30;
 const MIN_W = 64;
 
-export const personLabel = (p) => (p.born === null ? p.name : `${p.name} · ${p.born}`);
+export const personLabel = (p) => (lifeText(p) ? `${p.name} · ${lifeText(p)}` : p.name);
 
 export function estimateWidth(text) {
   return Math.max(MIN_W, Math.round(String(text).length * CHAR_W + PAD));
@@ -125,19 +125,34 @@ const centered = (xs) => {
   return xs.map((x) => x - mid);
 };
 
-// Раскладка семьи. measure(текст) — ширина таблички, yearPx — масштаб времени.
-export function familyLayout(fam, { measure = estimateWidth, yearPx = YEAR_PX, gap = GAP } = {}) {
+// Раскладка семьи. measure(человек) — ширина таблички, yearPx — масштаб времени.
+// rows — вместо времени ярусы поколений через rows px (для редактора);
+// nodeH, unionW, unionH — размеры узлов, по которым считаются зазоры.
+// skip — корни, которые раскладывать не нужно (редактор ставит их сам).
+export function familyLayout(
+  fam,
+  { measure = (p) => estimateWidth(personLabel(p)), yearPx = YEAR_PX, gap = GAP, rows = null, nodeH = NODE_H, unionW = UNION_W, unionH = UNION_W, skip = new Set() } = {},
+) {
   const year = yearsOf(fam);
   const kids = layoutKids(fam, year);
   const parentOf = new Map();
   for (const [id, list] of kids) for (const k of list) parentOf.set(k, id);
-  const treeRoots = roots(fam).map((p) => p.id);
+  const treeRoots = roots(fam)
+    .map((p) => p.id)
+    .filter((id) => !skip.has(id));
   const base = year.size ? Math.min(...year.values()) : 0;
 
   // Высота — год, но не ближе MIN_DY к родителю. Прижатые к родителю всё
   // равно стоят по старшинству: каждый год младше — ещё на 2px выше.
   const y = new Map();
-  const setY = (id) => {
+  const setY = (id, depth = 0) => {
+    if (rows !== null) {
+      // Ярусы: человек → пара → дети пары. Ребёнок без пары пропускает ярус
+      // пары, чтобы карточки родителя и ребёнка не наезжали друг на друга.
+      y.set(id, -depth * rows + 0);
+      for (const k of kids.get(id)) setY(k, depth + (isUnionId(id) || isUnionId(k) ? 1 : 2));
+      return;
+    }
     const own = -(year.get(id) - base) * yearPx + 0;
     const parent = parentOf.get(id);
     const lift = parent === undefined ? 0 : Math.max(0, year.get(id) - year.get(parent)) * 2;
@@ -148,14 +163,14 @@ export function familyLayout(fam, { measure = estimateWidth, yearPx = YEAR_PX, g
   const groundY = Math.max(0, ...treeRoots.map((r) => y.get(r))) + TRUNK_H;
 
   const width = new Map();
-  for (const p of fam.people) width.set(p.id, measure(personLabel(p)));
-  for (const u of fam.unions) width.set(u.id, UNION_W);
+  for (const p of fam.people) width.set(p.id, measure(p));
+  for (const u of fam.unions) width.set(u.id, unionW);
 
   const offset = new Map();
   const tips = new Map();
   const place = (id) => {
     const w = width.get(id);
-    const h = isUnionId(id) ? UNION_W : NODE_H;
+    const h = isUnionId(id) ? unionH : nodeH;
     const contour = new Map();
     addSpan(contour, y.get(id) - h / 2, y.get(id) + h / 2, -w / 2, w / 2);
     const parent = parentOf.get(id);
@@ -177,8 +192,10 @@ export function familyLayout(fam, { measure = estimateWidth, yearPx = YEAR_PX, g
   const treeContour = new Map();
   for (const r of treeRoots) {
     const contour = place(r);
-    const half = barkRadius(tips.get(r)) * 2.4 + 4; // ствол с расширением у земли
-    addSpan(contour, y.get(r), groundY, -half, half);
+    if (rows === null) {
+      const half = barkRadius(tips.get(r)) * 2.4 + 4; // ствол с расширением у земли
+      addSpan(contour, y.get(r), groundY, -half, half);
+    }
     treeContour.set(r, contour);
   }
 
@@ -207,7 +224,7 @@ export function familyLayout(fam, { measure = estimateWidth, yearPx = YEAR_PX, g
           [u.partner, u.partner, u.id],
         ]) {
           const next = treeOf.get(there);
-          if (treeOf.get(mine) !== root || desired.has(next)) continue;
+          if (!next || treeOf.get(mine) !== root || desired.has(next)) continue;
           desired.set(next, desired.get(root) + rel.get(here) - rel.get(there));
           queue.push(next);
         }
@@ -243,7 +260,7 @@ export function familyLayout(fam, { measure = estimateWidth, yearPx = YEAR_PX, g
   for (const n of nodes.values()) {
     bounds.minX = Math.min(bounds.minX, n.x - n.width / 2);
     bounds.maxX = Math.max(bounds.maxX, n.x + n.width / 2);
-    bounds.minY = Math.min(bounds.minY, n.y - NODE_H / 2);
+    bounds.minY = Math.min(bounds.minY, n.y - nodeH / 2);
   }
   if (!nodes.size) Object.assign(bounds, { minX: -100, maxX: 100, minY: -100 });
   return { nodes, order, bounds, groundY, roots: treeRoots, base, yearPx, yearY: (yr) => -(yr - base) * yearPx + 0 };

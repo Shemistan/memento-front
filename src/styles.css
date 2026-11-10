@@ -175,7 +175,6 @@ body:not([data-view="flat"]) [data-view="flat"] { display: none; }
 .flat-knot { fill: #7b5638; transition: fill 0.4s; }
 .flat.show-nodes .flat-knot { fill: #5a3519; }
 
-.flat-leaf { transition: transform 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) var(--delay, 0ms), opacity 0.4s var(--delay, 0ms); }
 .flat-leaf.tone-0 { fill: #5f9a3b; }
 .flat-leaf.tone-1 { fill: #77b047; }
 .flat-leaf.tone-2 { fill: #4c8433; }
@@ -183,6 +182,13 @@ body:not([data-view="flat"]) [data-view="flat"] { display: none; }
 /* Масштаб листа задан атрибутом; CSS-трансформация его заменяет — поэтому
    прячем лист через scale(0), а показываем, сняв правило. */
 .flat.no-leaves .flat-leaf { transform: scale(0); opacity: 0; }
+/* «Осень у ушедших»: листья ушедших — тёплых осенних тонов. */
+.flat-leaf { transition: transform 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) var(--delay, 0ms), opacity 0.4s var(--delay, 0ms), fill 0.6s; }
+.flat.autumn .is-gone .flat-leaf.tone-0 { fill: #c9852f; }
+.flat.autumn .is-gone .flat-leaf.tone-1 { fill: #d9a441; }
+.flat.autumn .is-gone .flat-leaf.tone-2 { fill: #b0562c; }
+.flat.autumn .is-gone .flat-leaf.tone-3 { fill: #ddb85a; }
+.flat-node.is-gone rect { fill: #f3ede2; }
 
 /* Лианы пар: цвет задаётся атрибутом stroke — у каждой пары свой. */
 .flat-vine { fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
@@ -231,6 +237,127 @@ select {
 .branch-list .is-union { color: #8a3f62; font-weight: 600; }
 #tree-form { margin-top: 10px; }
 
+/* --- Редактор --- */
+
+body[data-view="editor"] .switches { display: none; }
+.check { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+.warn { margin: 8px 0 0; padding: 6px 9px; border-radius: 8px; background: #fbefd5; color: #7a4e0e; font-size: 12px; }
+
+.editor {
+  position: fixed;
+  inset: 0 calc(var(--panel-w) + 32px) 0 0;
+  overflow: auto;
+  background: #f6f2e8 radial-gradient(rgba(60, 45, 25, 0.13) 1px, transparent 1.4px) 0 0 / 22px 22px;
+}
+.editor-hint {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: fit-content;
+  margin: 0;
+  padding: 10px 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.editor-world { position: relative; margin: 0 auto; }
+.editor-links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
+.editor-link { fill: none; stroke: #a08463; stroke-width: 1.6; stroke-linejoin: round; }
+.editor-link--pair { stroke-width: 2; stroke-dasharray: 6 5; }
+
+.ecard {
+  position: absolute;
+  width: 228px;
+  height: 104px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  border: 1px solid #d8c9b0;
+  border-radius: 14px;
+  background: #fffaf0;
+  box-shadow: 0 4px 14px rgba(60, 45, 25, 0.1);
+  transition: left 0.3s ease, top 0.3s ease, box-shadow 0.15s, border-color 0.15s;
+}
+.ecard.is-gone { background: #f1ebdf; }
+.ecard.is-selected { border-color: #c99a1c; box-shadow: 0 0 0 3px rgba(255, 196, 61, 0.55), 0 4px 14px rgba(60, 45, 25, 0.1); }
+.ecard input { min-width: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink); font: inherit; }
+.ecard input:hover { border-color: var(--line); }
+.ecard input:focus { border-color: var(--accent); background: #fff; outline: none; }
+.ecard__name { padding: 2px 5px; font-weight: 700; font-size: 15px; }
+.ecard__life { display: flex; align-items: center; gap: 3px; }
+.ecard__life input[type="number"] { width: 66px; padding: 2px 5px; font-size: 13px; border-color: var(--line); background: #fff; }
+.ecard input[type="number"] { -moz-appearance: textfield; }
+.ecard input[type="number"]::-webkit-inner-spin-button,
+.ecard input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.ecard__dash { color: var(--muted); }
+.ecard__dead { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; color: var(--muted); font-size: 15px; cursor: pointer; }
+.ecard__actions { display: flex; gap: 4px; }
+.ecard__actions button, .eunion button {
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+.ecard__actions button:hover, .eunion button:hover { border-color: var(--accent); color: var(--accent); }
+.ecard__actions .ecard__remove, .eunion .ecard__remove { margin-left: auto; color: var(--muted); }
+.ecard__actions .ecard__remove:hover, .eunion .ecard__remove:hover { border-color: var(--danger); color: var(--danger); }
+.ecard__up {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  transform: translateX(-50%);
+  border: 1px solid #d8c9b0;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--accent);
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.ecard:hover .ecard__up, .ecard:focus-within .ecard__up, .ecard.is-selected .ecard__up { opacity: 1; }
+@media (hover: none) { .ecard__up { opacity: 1; } }
+.ecard__warn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #e2a33a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+  cursor: help;
+}
+
+.eunion {
+  position: absolute;
+  width: 168px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 5px 0 9px;
+  border: 2px solid var(--vine, #b07a4a);
+  border-radius: 16px;
+  background: #fff;
+  transition: left 0.3s ease, top 0.3s ease, box-shadow 0.15s;
+}
+.eunion.is-selected { box-shadow: 0 0 0 3px rgba(255, 196, 61, 0.55); }
+.eunion__rings { color: var(--vine, #b07a4a); font-size: 17px; font-weight: 700; }
+.eunion input { width: 82px; padding: 2px 5px; font-size: 13px; }
+.eunion button { padding: 2px 7px; }
+
 .panel-toggle { display: none; }
 
 @media (max-width: 720px) {
@@ -245,6 +372,7 @@ select {
   }
   .panel.is-collapsed { transform: translateY(calc(100% + 16px)); }
   .zoom { top: 12px; bottom: auto; left: 12px; }
+  .editor { inset: 0; }
   .panel-toggle {
     display: block;
     position: fixed;

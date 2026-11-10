@@ -1,6 +1,7 @@
 // Семья: люди, пары и кто от кого родился. Только данные, без отрисовки.
-// Человек: { id: 'pN', name, born, parent, added }; parent — id пары (ребёнок
-// пары), id человека (ребёнок без пары) или null (корень своего дерева).
+// Человек: { id: 'pN', name, born, dead, died, parent, added }; parent — id пары
+// (ребёнок пары), id человека (ребёнок без пары) или null (корень своего
+// дерева). dead — человека нет в живых; died — год смерти, если известен.
 // Пара: { id: 'uN', host, partner, since } — дети пары растут на дереве host,
 // лиана тянется к нему от partner.
 import { ROOT_ID } from '../model.js';
@@ -33,6 +34,17 @@ export function unionsOf(fam, personId) {
 
 export const partnerUnionsOf = (fam, personId) => fam.unions.filter((u) => u.partner === personId);
 
+// Супруг «со стороны»: без предков, без детей и своих пар, в одной паре.
+// В тексте пишется прямо в строке пары, в редакторе стоит рядом с супругом.
+export function isOutsidePartner(fam, person) {
+  return (
+    person.parent === null &&
+    !childrenOf(fam, person.id).length &&
+    !fam.unions.some((u) => u.host === person.id) &&
+    partnerUnionsOf(fam, person.id).length === 1
+  );
+}
+
 // Человек, на чьей ветке растут дети parentId (для пары — её host).
 export function carrierOf(fam, parentId) {
   return isUnionId(parentId) ? getUnion(fam, parentId)?.host ?? null : parentId;
@@ -48,14 +60,53 @@ export function rootOf(fam, personId) {
   return person;
 }
 
-export function addPerson(fam, { name, born = null, parent = null, added = 0 } = {}) {
+export function addPerson(fam, { name, born = null, died = null, dead = false, parent = null, added = 0, before = null } = {}) {
   if (parent !== null && !(isUnionId(parent) ? getUnion(fam, parent) : getPerson(fam, parent))) {
     throw new Error(`Нет родителя ${parent}`);
   }
   fam.seq += 1;
   const person = { id: `p${fam.seq}`, name: cleanName(name, `Человек ${fam.seq}`), born: cleanYear(born), parent, added };
-  fam.people.push(person);
+  setDeath(person, { dead, died });
+  // before — встать в списке перед этим человеком: порядок корней задаёт,
+  // какое дерево главное.
+  const at = before ? fam.people.findIndex((p) => p.id === before) : -1;
+  if (at >= 0) fam.people.splice(at, 0, person);
+  else fam.people.push(person);
   return person;
+}
+
+// Год смерти делает человека ушедшим; dead без года — «умер, год неизвестен».
+function setDeath(person, { dead, died }) {
+  person.died = cleanYear(died);
+  person.dead = Boolean(dead) || person.died !== null;
+}
+
+export function setDied(fam, id, { dead = false, died = null } = {}) {
+  const person = getPerson(fam, id);
+  if (person) setDeath(person, { dead, died });
+  return person;
+}
+
+// Добавляет родителя: у корня — нового предка (человек встаёт в его дерево);
+// у ребёнка без пары — второго родителя, и родители становятся парой.
+export function canAddParent(fam, id) {
+  const person = getPerson(fam, id);
+  return Boolean(person) && !isUnionId(person.parent);
+}
+
+export function addParent(fam, childId, fields = {}) {
+  const child = getPerson(fam, childId);
+  if (!child) throw new Error('Нет такого человека');
+  if (isUnionId(child.parent)) throw new Error('Оба родителя уже есть');
+  if (child.parent === null) {
+    const parent = addPerson(fam, { ...fields, before: child.id });
+    child.parent = parent.id;
+    return { parent };
+  }
+  const parent = addPerson(fam, fields);
+  const union = addUnion(fam, child.parent, parent.id);
+  child.parent = union.id;
+  return { parent, union };
 }
 
 export function addUnion(fam, hostId, partnerId, since = null) {
@@ -117,12 +168,22 @@ export function removePerson(fam, id) {
 }
 
 // --- текстовый формат ---
-// «Имя 1950» — человек; отступ — ребёнок строки выше.
+// «Имя 1950» — человек; «Имя 1926–1998» — с годом смерти, «Имя 1926–?» —
+// умер, год неизвестен. Отступ — ребёнок строки выше.
 // «+ Имя 1952 (1975)» — пара с человеком выше; её дети — с отступом под ней.
 // «+ @Имя 1952» — пара с человеком, описанным в другом месте (по имени и году).
 
-const PERSON_RE = /^(.*?)(?:\s+(\d{3,4}|\?))?$/;
-const UNION_RE = /^\+\s*(@)?\s*(.*?)(?:\s+(\d{3,4}|\?))?(?:\s*\((\d{3,4})\))?$/;
+const LIFE = String.raw`(?:\s+(\d{3,4}|\?)(?:\s*([–—-])\s*(\d{3,4}|\?)?)?)?`;
+const PERSON_RE = new RegExp(String.raw`^(.*?)${LIFE}$`);
+const UNION_RE = new RegExp(String.raw`^\+\s*(@)?\s*(.*?)${LIFE}(?:\s*\((\d{3,4})\))?$`);
+
+// Годы жизни для подписи: «1926», «1926–1998», «?–1998», «1926–?».
+export function lifeText(person) {
+  if (!person.dead) return person.born === null ? '' : String(person.born);
+  return `${person.born ?? '?'}–${person.died ?? '?'}`;
+}
+
+const life = (born, dash, died) => ({ born: born === '?' ? null : born, dead: Boolean(dash), died: died === '?' ? null : died });
 
 export function parseFamily(text, added = 0) {
   const lines = String(text)
@@ -141,19 +202,19 @@ export function parseFamily(text, added = 0) {
     const above = stack[stack.length - 1]?.id ?? null;
 
     if (line.startsWith('+')) {
-      const [, ref, name, born, since] = line.match(UNION_RE);
+      const [, ref, name, born, dash, died, since] = line.match(UNION_RE);
       if (!above || isUnionId(above)) throw new Error(`Строка ${no}: пара должна стоять под человеком`);
       if (!name.trim()) throw new Error(`Строка ${no}: не указано имя супруга`);
       const union = { id: null, host: above, partner: null, since: cleanYear(since) };
       if (ref) refs.push({ union, name: name.trim(), born: cleanYear(born), no });
-      else union.partner = addPerson(fam, { name, born: born === '?' ? null : born, added }).id;
+      else union.partner = addPerson(fam, { name, ...life(born, dash, died), added }).id;
       fam.seq += 1;
       union.id = `u${fam.seq}`;
       fam.unions.push(union);
       stack.push({ indent, id: union.id });
     } else {
-      const [, name, born] = line.match(PERSON_RE);
-      const person = addPerson(fam, { name, born: born === '?' ? null : born, parent: above, added });
+      const [, name, born, dash, died] = line.match(PERSON_RE);
+      const person = addPerson(fam, { name, ...life(born, dash, died), parent: above, added });
       stack.push({ indent, id: person.id });
     }
   }
@@ -165,29 +226,62 @@ export function parseFamily(text, added = 0) {
   return fam;
 }
 
-const yearText = (year) => (year === null ? '' : ` ${year}`);
+const lifeSuffix = (person) => {
+  const text = lifeText(person);
+  return text ? ` ${text}` : '';
+};
 
 export function toFamilyText(fam) {
-  // Супруг без предков, без детей и без своих пар пишется прямо в строке пары.
-  const inline = (person) =>
-    person.parent === null &&
-    !childrenOf(fam, person.id).length &&
-    !unionsOf(fam, person.id).length &&
-    partnerUnionsOf(fam, person.id).length === 1;
+  const inline = (person) => isOutsidePartner(fam, person);
   const lines = [];
   const walkPerson = (person, depth) => {
-    lines.push(`${'  '.repeat(depth)}${person.name}${yearText(person.born)}`);
+    lines.push(`${'  '.repeat(depth)}${person.name}${lifeSuffix(person)}`);
     for (const child of childrenOf(fam, person.id)) walkPerson(child, depth + 1);
     for (const union of unionsOf(fam, person.id)) {
       const partner = getPerson(fam, union.partner);
       const since = union.since === null ? '' : ` (${union.since})`;
-      const mark = inline(partner) ? '' : '@';
-      lines.push(`${'  '.repeat(depth + 1)}+ ${mark}${partner.name}${yearText(partner.born)}${since}`);
+      // Ссылка ищет человека по имени и году рождения — смерть в ней лишняя.
+      const who = inline(partner) ? `${partner.name}${lifeSuffix(partner)}` : `@${partner.name}${partner.born === null ? '' : ` ${partner.born}`}`;
+      lines.push(`${'  '.repeat(depth + 1)}+ ${who}${since}`);
       for (const child of childrenOf(fam, union.id)) walkPerson(child, depth + 2);
     }
   };
   for (const root of roots(fam)) if (!inline(root)) walkPerson(root, 0);
   return lines.join('\n');
+}
+
+// --- проверки ---
+// Мягкие предупреждения о вероятных опечатках в годах: Map id → [текст].
+export function checks(fam) {
+  const found = new Map();
+  const warn = (id, text) => found.set(id, [...(found.get(id) ?? []), text]);
+  const parentsOf = (person) => {
+    if (person.parent === null) return [];
+    if (!isUnionId(person.parent)) return [getPerson(fam, person.parent)];
+    const union = getUnion(fam, person.parent);
+    return [getPerson(fam, union.host), getPerson(fam, union.partner)];
+  };
+  for (const person of fam.people) {
+    if (person.born !== null && person.died !== null && person.died < person.born) warn(person.id, 'Год смерти раньше года рождения');
+    if (person.born === null) continue;
+    for (const parent of parentsOf(person)) {
+      if (parent?.died !== null && parent?.died !== undefined && person.born > parent.died + 1) {
+        warn(person.id, `Родился(-ась) после смерти родителя: ${parent.name}, ${parent.died}`);
+      }
+      if (parent?.born !== null && parent?.born !== undefined && person.born - parent.born < 12) {
+        warn(person.id, `Родитель слишком молод: ${parent.name}, ${parent.born}`);
+      }
+    }
+  }
+  for (const union of fam.unions) {
+    if (union.since === null) continue;
+    for (const id of [union.host, union.partner]) {
+      const person = getPerson(fam, id);
+      if (person.died !== null && union.since > person.died) warn(union.id, `Брак после смерти: ${person.name}, ${person.died}`);
+      if (person.born !== null && union.since < person.born) warn(union.id, `Брак раньше рождения: ${person.name}, ${person.born}`);
+    }
+  }
+  return found;
 }
 
 export function serialize(fam) {
@@ -208,6 +302,8 @@ export function deserialize(json) {
     id: String(p.id),
     name: cleanName(p.name, String(p.id)),
     born: cleanYear(p.born),
+    died: cleanYear(p.died),
+    dead: Boolean(p.dead) || cleanYear(p.died) !== null,
     parent: ids.has(p.parent) || unionIds.has(p.parent) ? p.parent : null,
     added: Number(p.added) || 0,
   }));
@@ -232,11 +328,9 @@ export function deserialize(json) {
 // Старое дерево веток (memento-tree:v1) — люди без годов и пар.
 export function fromTree(tree) {
   const fam = createFamily();
-  const map = new Map();
   const walk = (id, parent) => {
     const node = tree.nodes.find((n) => n.id === id);
     const person = addPerson(fam, { name: node.name, parent, added: node.born || 0 });
-    map.set(id, person.id);
     for (const child of tree.nodes.filter((n) => n.parentId === id)) walk(child.id, person.id);
   };
   walk(ROOT_ID, null);

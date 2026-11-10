@@ -1,7 +1,10 @@
 import { ROOT_ID, deserialize as deserializeTree } from './model.js';
 import {
+  addParent,
   addPerson,
   addUnion,
+  canAddParent,
+  checks,
   childrenOf,
   deserialize,
   fromTree,
@@ -16,6 +19,7 @@ import {
   roots,
   serialize,
   setBorn,
+  setDied,
   setSince,
   toFamilyText,
   toTree,
@@ -24,12 +28,13 @@ import {
 import { buildPlan, carryOver, pose } from './layout.js';
 import { createRenderer } from './render.js';
 import { createFlatView } from './flat/view.js';
+import { createEditor } from './editor/view.js';
 
 const STORAGE_KEY = 'memento-family:v1';
 const LEGACY_KEY = 'memento-tree:v1';
 
-const DEMO = `Николай 1926
-  + Анна 1929 (1950)
+const DEMO = `Николай 1926–1998
+  + Анна 1929–2011 (1950)
     Пётр 1952
       + @Мария 1955 (1976)
         Ирина 1977
@@ -39,8 +44,8 @@ const DEMO = `Николай 1926
     Елена 1956
       + Виктор 1953 (1979)
         Светлана 1980
-Сергей 1925
-  + Валентина 1930 (1952)
+Сергей 1925–1987
+  + Валентина 1930–? (1952)
     Мария 1955
     Татьяна 1958`;
 
@@ -48,6 +53,12 @@ const $ = (id) => document.getElementById(id);
 const els = {
   canvas: $('scene'),
   flat: $('flat'),
+  editor: $('editor'),
+  autumn: $('autumn-toggle'),
+  personDied: $('person-died'),
+  personDead: $('person-dead'),
+  personWarn: $('person-warn'),
+  parentBtn: $('parent-btn'),
   zoom: $('zoom'),
   zoomIn: $('zoom-in'),
   zoomOut: $('zoom-out'),
@@ -102,6 +113,14 @@ let leafAmount = state.leaves ? 1 : 0;
 let windAmount = state.wind ? 1 : 0;
 const renderer = createRenderer(els.canvas);
 const flat = createFlatView(els.flat, { onSelect: select });
+const editor = createEditor(els.editor, { act: editorAct, onSelect: select });
+
+// Правка из редактора: изменить семью и показать результат во всех видах.
+function editorAct(change) {
+  const result = change(state.fam);
+  familyChanged();
+  return result;
+}
 
 function labelsOf() {
   return new Map(toTree(state.fam).nodes.map((n) => [n.id, n.name]));
@@ -112,7 +131,7 @@ function exists(id) {
 }
 
 function loadState() {
-  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true };
+  const settings = { leaves: true, labels: false, wind: true, view: 'living', nodes: true, autumn: true };
   const demo = () => {
     const fam = parseFamily(DEMO);
     return { ...settings, fam, selectedId: roots(fam)[0].id };
@@ -135,8 +154,9 @@ function loadState() {
       leaves: data.leaves !== false,
       labels: Boolean(data.labels),
       wind: data.wind !== false,
-      view: data.view === 'flat' ? 'flat' : 'living',
+      view: ['flat', 'editor'].includes(data.view) ? data.view : 'living',
       nodes: data.nodes !== false,
+      autumn: data.autumn !== false,
     };
   } catch {
     return demo();
@@ -155,6 +175,7 @@ function saveState() {
         wind: state.wind,
         view: state.view,
         nodes: state.nodes,
+        autumn: state.autumn,
       }),
     );
   } catch {
@@ -175,6 +196,7 @@ function familyChanged({ regrow = false } = {}) {
   livingLabels = labelsOf();
   if (!exists(state.selectedId)) state.selectedId = roots(state.fam)[0]?.id ?? null;
   flat.setFamily(state.fam, { regrow });
+  editor.render(state.fam, state.selectedId);
   saveState();
   renderPanel();
 }
@@ -200,6 +222,10 @@ function renderPanel() {
   const union = isUnionId(state.selectedId) ? getUnion(fam, state.selectedId) : null;
   const person = union ? null : getPerson(fam, state.selectedId);
   flat.setSelected(state.selectedId);
+  editor.setSelected(state.selectedId);
+  const warnings = checks(fam).get(state.selectedId);
+  els.personWarn.hidden = !warnings;
+  els.personWarn.textContent = warnings ? warnings.join('. ') : '';
 
   els.selTitle.textContent = union ? 'Выбрана пара' : 'Выбран человек';
   els.personForm.hidden = !person;
@@ -208,6 +234,9 @@ function renderPanel() {
   if (person) {
     els.personName.value = person.name;
     els.personBorn.value = person.born ?? '';
+    els.personDied.value = person.died ?? '';
+    els.personDead.checked = person.dead;
+    els.parentBtn.hidden = !canAddParent(fam, person.id);
     els.childName.placeholder = `Ребёнок: ${person.name}`;
     els.childHint.textContent = unionsOf(fam, person.id).length
       ? 'Это ребёнок без пары. Ребёнка пары добавляйте, выбрав значок пары.'
@@ -224,6 +253,7 @@ function renderPanel() {
     els.childName.placeholder = `Ребёнок: ${host.name} и ${partner.name}`;
     els.childHint.textContent = '';
     els.remove.textContent = 'Разорвать пару';
+    els.parentBtn.hidden = true;
     els.remove.disabled = false;
     els.remove.title = 'Дети пары останутся у ' + host.name;
   }
@@ -303,6 +333,7 @@ els.personForm.addEventListener('submit', (e) => {
   e.preventDefault();
   renamePerson(state.fam, state.selectedId, els.personName.value);
   setBorn(state.fam, state.selectedId, yearValue(els.personBorn));
+  setDied(state.fam, state.selectedId, { dead: els.personDead.checked, died: yearValue(els.personDied) });
   familyChanged();
 });
 
@@ -365,6 +396,14 @@ els.remove.addEventListener('click', () => {
   familyChanged();
 });
 
+els.parentBtn.addEventListener('click', () => {
+  const { parent } = addParent(state.fam, state.selectedId, { added: Date.now() });
+  state.selectedId = parent.id;
+  familyChanged();
+  els.personName.focus();
+  els.personName.select();
+});
+
 els.treeForm.addEventListener('submit', (e) => {
   e.preventDefault();
   const person = addPerson(state.fam, { name: els.treeName.value, born: yearValue(els.treeBorn), added: Date.now() });
@@ -386,6 +425,11 @@ els.labels.addEventListener('change', () => {
 els.nodes.addEventListener('change', () => {
   state.nodes = els.nodes.checked;
   flat.setNodes(state.nodes);
+  saveState();
+});
+els.autumn.addEventListener('change', () => {
+  state.autumn = els.autumn.checked;
+  flat.setAutumn(state.autumn);
   saveState();
 });
 els.wind.addEventListener('change', () => {
@@ -418,7 +462,8 @@ els.replay.addEventListener('click', () => {
 function applyView() {
   const isFlat = state.view === 'flat';
   document.body.dataset.view = state.view;
-  els.canvas.hidden = isFlat;
+  els.canvas.hidden = state.view !== 'living';
+  els.editor.hidden = state.view !== 'editor';
   els.flat.toggleAttribute('hidden', !isFlat); // у SVG нет свойства hidden
   els.zoom.hidden = !isFlat;
   els.tooltip.hidden = true;
@@ -491,6 +536,7 @@ function resize() {
 
 function frame() {
   requestAnimationFrame(frame);
+  if (state.view === 'editor') return;
   if (state.view === 'flat') {
     flat.frame(treeArea());
     return;
@@ -514,6 +560,7 @@ els.leaves.checked = state.leaves;
 els.labels.checked = state.labels;
 els.wind.checked = state.wind;
 els.nodes.checked = state.nodes;
+els.autumn.checked = state.autumn;
 els.outline.value = toFamilyText(state.fam);
 if (window.matchMedia('(max-width: 720px)').matches) {
   els.panel.classList.add('is-collapsed');
@@ -522,6 +569,8 @@ if (window.matchMedia('(max-width: 720px)').matches) {
 flat.setFamily(state.fam, { regrow: true });
 flat.setLeaves(state.leaves);
 flat.setNodes(state.nodes);
+flat.setAutumn(state.autumn);
+editor.render(state.fam, state.selectedId);
 applyView();
 resize();
 renderPanel();
