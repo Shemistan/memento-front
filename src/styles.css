@@ -102,6 +102,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .danger:hover:not(:disabled) { background: rgba(163, 58, 37, 0.08); }
 
 .switches { display: flex; flex-wrap: wrap; gap: 14px; }
+.range { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; user-select: none; }
+.range input { width: 110px; accent-color: var(--accent); }
+.range output { min-width: 2.2em; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; user-select: none; }
 .switch input { position: absolute; opacity: 0; pointer-events: none; }
 .switch span { position: relative; width: 36px; height: 20px; border-radius: 10px; background: #cbbfae; transition: background 0.2s; }

@@ -83,21 +83,38 @@ export function twigPath(start, angle, length, r0, steps = 6) {
 
 const range = (rand, a, b) => a + (b - a) * rand();
 
+export const TWIG_STEP = 70; // px ветки на одну веточку при густоте 1
+const MAX_TWIGS = 14;
+
+// Сколько веточек на ветке длиной length px: чем длиннее ветка, тем больше,
+// density — коэффициент густоты (0 — голые ветки). Без длины — 3, как раньше.
+export function twigCount(length, density = 1) {
+  if (length === undefined) return 3;
+  if (!(density > 0)) return 0;
+  return Math.max(1, Math.min(MAX_TWIGS, Math.round((length / TWIG_STEP) * density)));
+}
+
 // Веточки, которых нет в модели: они дают кроне вид настоящего дерева.
-// Угол — от направления родительской ветки в точке t, длина — доля яруса.
-// Детерминированно по id, чтобы правки не перетасовывали крону.
-export function twigSpecs(id, { tip = false } = {}) {
+// Угол — от направления родительской ветки в точке t, длина — доля TWIG_UNIT.
+// Детерминированно по id, чтобы правки не перетасовывали крону. На длинной
+// ветке (length, px) веточек больше, они длиннее и ветвистее.
+export function twigSpecs(id, { tip = false, length, density = 1 } = {}) {
   const rand = rng(hashString(`flat-twig:${id}`));
-  const twig = (t, side, angle, len) => ({
-    t,
-    angle: side * angle,
-    len,
-    kids: rand() < 0.7 ? [{ t: range(rand, 0.45, 0.7), angle: -side * range(rand, 28, 45), len: range(rand, 0.4, 0.6) }] : [],
-  });
+  const reach = length === undefined ? 1 : Math.max(1, Math.min(1.7, length / 260));
+  const twig = (t, side, angle, len) => {
+    const kids = [];
+    if (rand() < 0.7) kids.push({ t: range(rand, 0.45, 0.7), angle: -side * range(rand, 28, 45), len: range(rand, 0.4, 0.6) });
+    // У длинной веточки — ещё отросток в другую сторону.
+    if (len > 0.6 && rand() < 0.6) kids.push({ t: range(rand, 0.25, 0.4), angle: side * range(rand, 25, 40), len: range(rand, 0.3, 0.45) });
+    return { t, angle: side * angle, len, kids };
+  };
   const twigs = [];
+  const count = twigCount(length, density);
   let side = rand() < 0.5 ? -1 : 1;
-  for (let i = 0; i < 3; i++) {
-    twigs.push(twig(0.2 + i * 0.25 + range(rand, 0, 0.1), side, range(rand, 30, 55), range(rand, 0.32, 0.52)));
+  for (let i = 0; i < count; i++) {
+    // Равномерно вдоль ветки, с разбросом; у самой развилки и под табличкой — пусто.
+    const t = count === 3 && length === undefined ? 0.2 + i * 0.25 + range(rand, 0, 0.1) : 0.12 + ((i + range(rand, 0.25, 0.75)) / count) * 0.78;
+    twigs.push(twig(t, side, range(rand, 30, 55), range(rand, 0.32, 0.52) * reach));
     side = -side;
   }
   if (tip) {

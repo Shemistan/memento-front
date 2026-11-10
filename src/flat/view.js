@@ -16,6 +16,7 @@ import {
   trunkPath,
   twigLeaves,
   twigPath,
+  twigCount,
   twigSpecs,
   vineCurve,
   vinePath,
@@ -94,6 +95,7 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
   let yearPx = YEAR_PX;
   let selectedId = null;
   let animating = true;
+  let density = 1; // густота веточек (setDensity)
   let cam = { s: 1, x: 0, y: 0 };
   let autoFit = true;
   let placed = false; // камера ещё ни разу не ставилась — первый кадр без наплыва
@@ -113,9 +115,12 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
     // Наплыв в развилке: без табличек стык веток выглядит как у настоящего дерева.
     item.knot = keep(el('circle', { class: 'flat-knot', r: 0 }, knotLayer));
     item.node = keep(el('g', { class: `flat-node flat-node--${n.kind}`, tabindex: '0', role: 'button', 'data-id': n.id }, nodeLayer));
-    if (n.kind === 'person') {
+    // Декоративные веточки — и на ветках людей, и на ветке от человека к паре.
+    if (n.parentId) {
       item.decor = keep(el('g', {}, decorLayer));
       item.decorLeaves = keep(el('g', {}, decorLeafLayer));
+    }
+    if (n.kind === 'person') {
       item.leaves = keep(el('g', {}, leafLayer));
       item.rect = el('rect', { y: -NODE_H / 2, height: NODE_H, rx: NODE_H / 2 }, item.node);
       item.photo = el('image', { width: PHOTO, height: PHOTO, y: -PHOTO / 2, class: 'flat-photo', preserveAspectRatio: 'xMidYMid slice' }, item.node);
@@ -158,21 +163,39 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
     item.text.setAttribute('x', person.photo ? (PHOTO + 2) / 2 : 0);
     // У ушедших — осенние листья (если включено «Осень у ушедших»).
     item.leaves.classList.toggle('is-gone', person.dead);
-    item.decorLeaves.classList.toggle('is-gone', person.dead);
+    item.decorLeaves?.classList.toggle('is-gone', person.dead);
     item.node.classList.toggle('is-gone', person.dead);
     item.node.classList.toggle('is-viewer', fam.viewer === person.id);
-    if (item.tip === tip && item.leafWidth === n.width) return;
-    item.tip = tip;
-    item.leafWidth = n.width;
-    const bare = n.parentId === null && !childless;
-    item.leaves.replaceChildren(...(bare ? [] : leafSpots(n.id, { tip, width: n.width }).map(leaf)));
+    if (item.tip !== tip || item.leafWidth !== n.width) {
+      item.tip = tip;
+      item.leafWidth = n.width;
+      const bare = n.parentId === null && !childless;
+      item.leaves.replaceChildren(...(bare ? [] : leafSpots(n.id, { tip, width: n.width }).map(leaf)));
+      item.twigKey = null;
+    }
+    buildTwigs(item, n);
+  }
+
+  // Длина ветки от родителя до узла в нынешней раскладке.
+  function branchLength(n) {
+    const parent = layout.nodes.get(n.parentId);
+    return parent ? Math.hypot(n.x - parent.x, n.y - parent.y) : 0;
+  }
+
+  // Декоративные веточки: их число зависит от длины ветки и густоты, чтобы
+  // длинные ветки не стояли голыми. Контуры пересчитываются каждый кадр,
+  // пучки листьев на кончиках строятся заново, только когда меняется число.
+  function buildTwigs(item, n) {
+    if (!item.decor) return;
+    const length = branchLength(n);
+    const key = n.parentId === null ? 'root' : `${item.tip}:${twigCount(length, density)}`;
+    if (item.twigKey === key) return;
+    item.twigKey = key;
     item.decor.replaceChildren();
     item.decorLeaves.replaceChildren();
     item.twigs = [];
     if (n.parentId === null) return;
-    // Декоративные веточки: контуры пересчитываются каждый кадр,
-    // пучки листьев на кончиках строятся один раз.
-    twigSpecs(n.id, { tip }).forEach((spec, i) => {
+    twigSpecs(n.id, { tip: Boolean(item.tip), length, density }).forEach((spec, i) => {
       const parts = [spec, ...spec.kids].map((part, k) => {
         const leaves = el('g', {}, item.decorLeaves);
         leaves.append(...twigLeaves(`${n.id}/${i}/${k}`).map(leaf));
@@ -186,6 +209,7 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
     const host = getPerson(fam, union.host);
     const partner = getPerson(fam, union.partner);
     item.partnerId = union.partner;
+    buildTwigs(item, n);
     item.text.textContent = formatDate(union.since, union.sinceDate);
     item.node.setAttribute('aria-label', `Пара: ${host.name} и ${partner.name}`);
     // Лиана обвивает ветки детей этой пары — но не продолжение к следующей паре.
@@ -205,6 +229,20 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
     layout = familyLayout(fam, { measure, yearPx });
     parents = new Set([...layout.nodes.values()].map((n) => n.parentId));
     drawYears();
+    // Ветки стали длиннее или короче (растянулась шкала лет) — меняется и число веточек.
+    for (const [id, item] of items) {
+      const n = layout.nodes.get(id);
+      if (n && n.kind === item.kind && item.isRoot === (n.parentId === null)) buildTwigs(item, n);
+    }
+  }
+
+  // Густота веточек: коэффициент к их числу на единицу длины ветки.
+  function setDensity(value) {
+    density = Math.max(0, Number(value) || 0);
+    if (!layout) return;
+    for (const [id, item] of items) buildTwigs(item, layout.nodes.get(id));
+    for (const id of layout.order) for (const node of items.get(id).els) node.parentNode?.append(node);
+    animating = true;
   }
 
   function setFamily(family, { regrow = false } = {}) {
@@ -384,7 +422,7 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
         item.at = branchCurve(parent, pos);
         item.rAt = (t) => r1 + (r0 - r1) * (1 - t) ** 1.4;
         item.branch.setAttribute('d', branchPath(parent, pos, r0, r1));
-        if (n.kind === 'person') drawTwigs(item, grow);
+        if (item.twigs.length) drawTwigs(item, grow);
       } else {
         const tr = s.r * (0.35 + 0.65 * grow);
         item.trunk.setAttribute('d', trunkPath(pos, tr * 1.15, layout.groundY));
@@ -525,6 +563,7 @@ export function createFlatView(svg, { onSelect, photoOf = () => null }) {
     // приглушены. Скрыты: все ветки одинаковые — просто деревья с лианами.
     setNodes: (on) => svg.classList.toggle('show-nodes', on),
     setAutumn: (on) => svg.classList.toggle('autumn', on),
+    setDensity,
     wake: () => {
       animating = true;
     },
