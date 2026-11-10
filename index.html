@@ -21,7 +21,7 @@
   <aside id="panel" class="panel">
     <header class="panel__head">
       <h1>Живое дерево</h1>
-      <p class="muted">Кликните по ветке, чтобы выбрать её, и добавьте к ней новую.</p>
+      <p class="muted">Кликните по человеку или значку пары, чтобы выбрать, и добавьте ребёнка или пару.</p>
     </header>
 
     <div class="segmented" role="radiogroup" aria-label="Вид дерева">
@@ -37,29 +37,62 @@
     </section>
 
     <section class="panel__section">
-      <h2>Выбрана ветка</h2>
-      <form id="rename-form" class="row">
-        <input id="rename-input" type="text" maxlength="60" aria-label="Название ветки">
-        <button type="submit" class="ghost" title="Переименовать">Сохранить</button>
+      <h2 id="sel-title">Выбран человек</h2>
+      <form id="person-form" class="row">
+        <input id="person-name" type="text" maxlength="60" aria-label="Имя">
+        <input id="person-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения">
+        <button type="submit" class="ghost">Сохранить</button>
       </form>
-      <form id="add-form" class="row">
-        <input id="add-input" type="text" maxlength="60" placeholder="Название новой ветки" aria-label="Название новой ветки">
-        <button type="submit" class="primary">Добавить</button>
+      <div id="union-box" hidden>
+        <p id="union-names" class="pair-names"></p>
+        <form id="union-form" class="row">
+          <label class="muted" for="union-since">Год брака</label>
+          <input id="union-since" class="year" type="number" min="1" max="2999" placeholder="Год">
+          <button type="submit" class="ghost">Сохранить</button>
+        </form>
+      </div>
+      <form id="child-form" class="row">
+        <input id="child-name" type="text" maxlength="60" aria-label="Имя ребёнка">
+        <input id="child-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения ребёнка">
+        <button type="submit" class="primary">Ребёнок</button>
       </form>
+      <p id="child-hint" class="muted hint"></p>
+      <details id="pair-box" class="pair-box">
+        <summary>Создать пару</summary>
+        <form id="pair-form">
+          <select id="pair-partner" aria-label="Супруг"></select>
+          <div id="pair-new" class="row">
+            <input id="pair-name" type="text" maxlength="60" placeholder="Имя супруга" aria-label="Имя супруга">
+            <input id="pair-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения супруга">
+          </div>
+          <div class="row">
+            <label class="muted" for="pair-since">Год брака</label>
+            <input id="pair-since" class="year" type="number" min="1" max="2999" placeholder="Год">
+            <button type="submit" class="primary">Создать пару</button>
+          </div>
+          <p class="muted hint">Лиана потянется от супруга к выбранному человеку, дети пары вырастут из узла пары.</p>
+          <p id="pair-error" class="error" hidden></p>
+        </form>
+      </details>
       <div class="row row--split">
-        <button id="remove-btn" type="button" class="danger">Удалить ветку</button>
+        <button id="remove-btn" type="button" class="danger">Удалить</button>
         <span id="stats" class="muted"></span>
       </div>
     </section>
 
     <section class="panel__section panel__section--grow">
-      <h2>Все ветки</h2>
+      <h2>Семья</h2>
       <ul id="branch-list" class="branch-list"></ul>
+      <form id="tree-form" class="row">
+        <input id="tree-name" type="text" maxlength="60" placeholder="Человек со своим деревом" aria-label="Имя">
+        <input id="tree-born" class="year" type="number" min="1" max="2999" placeholder="Год" aria-label="Год рождения">
+        <button type="submit" class="ghost">Новое дерево</button>
+      </form>
     </section>
 
     <details class="panel__section">
       <summary>Задать структуру текстом</summary>
-      <p class="muted">Одна строка — одна ветка, вложенность — отступом в два пробела. Первая строка — ствол.</p>
+      <p class="muted">Строка — человек: «Имя 1950», ребёнок — отступом в два пробела. «+ Имя 1952 (1975)» — пара с человеком выше (в скобках год брака), её дети — отступом под ней. «+ @Имя 1952» — пара с человеком из другого дерева.</p>
       <textarea id="outline" rows="9" spellcheck="false"></textarea>
       <div class="row">
         <button id="outline-apply" type="button" class="primary">Вырастить</button>
