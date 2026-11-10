@@ -24,6 +24,7 @@ html, body {
 
 #scene { position: fixed; inset: 0; display: block; cursor: default; touch-action: manipulation; }
 #scene.is-pointer { cursor: pointer; }
+#scene[hidden] { display: none; }
 
 .tooltip {
   position: fixed;
@@ -137,6 +138,56 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .branch-list button:hover { background: rgba(60, 45, 25, 0.06); }
 .branch-list button[aria-current="true"] { background: var(--select); font-weight: 700; }
 
+.segmented { display: flex; padding: 3px; margin-bottom: 10px; border-radius: 11px; background: rgba(60, 45, 25, 0.08); }
+.segmented label { flex: 1; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span { display: block; padding: 6px 8px; border-radius: 8px; text-align: center; font-weight: 600; color: var(--muted); cursor: pointer; transition: background 0.15s, color 0.15s; }
+.segmented input:checked + span { background: #fff; color: var(--ink); box-shadow: 0 1px 4px rgba(40, 30, 15, 0.16); }
+.segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 1px; }
+body[data-view="flat"] [data-view="living"] { display: none; }
+
+/* --- Схема 2D --- */
+
+.flat {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: linear-gradient(#f4efe2 0%, #e9efdc 62%, #dfe8cf 100%);
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+}
+.flat[hidden] { display: none; }
+.flat.is-dragging { cursor: grabbing; }
+
+.flat-hill { fill: #b9cf92; }
+.flat-soil { fill: #a6bf7c; }
+.flat-bark { fill: #7b5638; stroke: #5e3f27; stroke-width: 0.8; stroke-linejoin: round; }
+.flat-roots { fill: #6c4a2f; }
+
+.flat-leaf { transition: transform 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) var(--delay, 0ms), opacity 0.4s var(--delay, 0ms); }
+.flat-leaf.tone-0 { fill: #5f9a3b; }
+.flat-leaf.tone-1 { fill: #77b047; }
+.flat-leaf.tone-2 { fill: #4c8433; }
+.flat-leaf.tone-3 { fill: #8fbf55; }
+/* Масштаб листа задан атрибутом; CSS-трансформация его заменяет — поэтому
+   прячем лист через scale(0), а показываем, сняв правило. */
+.flat.no-leaves .flat-leaf { transform: scale(0); opacity: 0; }
+
+.flat-node { cursor: pointer; outline: none; }
+.flat-node rect { fill: #fffaf0; stroke: #8a6a48; stroke-width: 1.4; transition: fill 0.15s, stroke 0.15s; }
+.flat-node text { fill: var(--ink); font: 600 13px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; pointer-events: none; }
+.flat-node:hover rect { fill: #fff; stroke: var(--accent); }
+.flat-node:focus-visible rect { stroke: var(--accent); stroke-width: 2.5; }
+.flat-node.is-selected rect { fill: var(--select); stroke: #7a5a17; stroke-width: 2; }
+
+.zoom { position: fixed; left: 16px; bottom: 16px; display: flex; gap: 6px; }
+.zoom[hidden] { display: none; }
+.zoom button { min-width: 38px; background: var(--panel-bg); border-color: var(--line); color: var(--ink); box-shadow: 0 4px 16px rgba(40, 50, 30, 0.16); }
+.zoom button:hover { background: #fff; }
+
 .panel-toggle { display: none; }
 
 @media (max-width: 720px) {
@@ -150,6 +201,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
     transition: transform 0.25s ease;
   }
   .panel.is-collapsed { transform: translateY(calc(100% + 16px)); }
+  .zoom { top: 12px; bottom: auto; left: 12px; }
   .panel-toggle {
     display: block;
     position: fixed;

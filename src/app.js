@@ -12,6 +12,7 @@ import {
 } from './model.js';
 import { buildPlan, carryOver, pose } from './layout.js';
 import { createRenderer } from './render.js';
+import { createFlatView } from './flat/view.js';
 
 const STORAGE_KEY = 'memento-tree:v1';
 
@@ -36,6 +37,11 @@ const DEMO = `Ствол
 const $ = (id) => document.getElementById(id);
 const els = {
   canvas: $('scene'),
+  flat: $('flat'),
+  zoom: $('zoom'),
+  zoomIn: $('zoom-in'),
+  zoomOut: $('zoom-out'),
+  zoomFit: $('zoom-fit'),
   tooltip: $('tooltip'),
   panel: $('panel'),
   panelToggle: $('panel-toggle'),
@@ -64,9 +70,10 @@ let hoverId = null;
 let leafAmount = state.leaves ? 1 : 0;
 let windAmount = state.wind ? 1 : 0;
 const renderer = createRenderer(els.canvas);
+const flat = createFlatView(els.flat, { onSelect: select });
 
 function loadState() {
-  const fallback = { tree: parseOutline(DEMO), selectedId: ROOT_ID, leaves: true, labels: false, wind: true };
+  const fallback = { tree: parseOutline(DEMO), selectedId: ROOT_ID, leaves: true, labels: false, wind: true, view: 'living' };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
@@ -78,6 +85,7 @@ function loadState() {
       leaves: data.leaves !== false,
       labels: Boolean(data.labels),
       wind: data.wind !== false,
+      view: data.view === 'flat' ? 'flat' : 'living',
     };
   } catch {
     return fallback;
@@ -94,6 +102,7 @@ function saveState() {
         leaves: state.leaves,
         labels: state.labels,
         wind: state.wind,
+        view: state.view,
       }),
     );
   } catch {
@@ -110,6 +119,7 @@ function treeChanged({ regrow = false } = {}) {
   } else {
     plan = carryOver(plan, buildPlan(state.tree), Date.now());
   }
+  flat.setTree(state.tree, { regrow });
   if (!getNode(state.tree, state.selectedId)) state.selectedId = ROOT_ID;
   saveState();
   renderPanel();
@@ -123,6 +133,7 @@ function select(id) {
 }
 
 function renderPanel() {
+  flat.setSelected(state.selectedId);
   const node = getNode(state.tree, state.selectedId);
   els.renameInput.value = node.name;
   els.addInput.placeholder = `Новая ветка от «${node.name}»`;
@@ -193,6 +204,7 @@ els.remove.addEventListener('click', () => {
 
 els.leaves.addEventListener('change', () => {
   state.leaves = els.leaves.checked;
+  flat.setLeaves(state.leaves);
   saveState();
 });
 els.labels.addEventListener('change', () => {
@@ -222,8 +234,33 @@ els.outlineApply.addEventListener('click', () => {
 });
 
 els.replay.addEventListener('click', () => {
-  epoch = Date.now();
+  if (state.view === 'flat') flat.replay();
+  else epoch = Date.now();
 });
+
+function applyView() {
+  const isFlat = state.view === 'flat';
+  document.body.dataset.view = state.view;
+  els.canvas.hidden = isFlat;
+  els.flat.toggleAttribute('hidden', !isFlat); // у SVG нет свойства hidden
+  els.zoom.hidden = !isFlat;
+  els.tooltip.hidden = true;
+  hoverId = null;
+  for (const radio of document.querySelectorAll('input[name="view"]')) radio.checked = radio.value === state.view;
+  if (isFlat) flat.wake();
+}
+
+for (const radio of document.querySelectorAll('input[name="view"]')) {
+  radio.addEventListener('change', () => {
+    state.view = radio.value;
+    saveState();
+    applyView();
+  });
+}
+
+els.zoomIn.addEventListener('click', () => flat.zoom(1.25));
+els.zoomOut.addEventListener('click', () => flat.zoom(0.8));
+els.zoomFit.addEventListener('click', () => flat.fit());
 
 els.reset.addEventListener('click', () => {
   state.tree = parseOutline(DEMO);
@@ -267,7 +304,7 @@ function treeArea() {
   const w = window.innerWidth;
   const desktop = window.matchMedia('(min-width: 721px)').matches;
   const panelW = desktop ? els.panel.offsetWidth + 32 : 0;
-  return { left: 0, right: w - panelW };
+  return { left: 0, right: w - panelW, height: window.innerHeight };
 }
 
 function resize() {
@@ -275,6 +312,11 @@ function resize() {
 }
 
 function frame() {
+  requestAnimationFrame(frame);
+  if (state.view === 'flat') {
+    flat.frame(treeArea());
+    return;
+  }
   const now = Date.now();
   leafAmount += ((state.leaves ? 1 : 0) - leafAmount) * 0.045;
   windAmount += ((state.wind ? 1 : 0) - windAmount) * 0.03;
@@ -288,7 +330,6 @@ function frame() {
     labels,
     leafAmount,
   });
-  requestAnimationFrame(frame);
 }
 
 window.addEventListener('resize', resize);
@@ -300,6 +341,9 @@ if (window.matchMedia('(max-width: 720px)').matches) {
   els.panel.classList.add('is-collapsed');
   els.panelToggle.setAttribute('aria-expanded', 'false');
 }
+flat.setTree(state.tree, { regrow: true });
+flat.setLeaves(state.leaves);
+applyView();
 resize();
 renderPanel();
 requestAnimationFrame(frame);

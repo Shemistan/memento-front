@@ -8,7 +8,13 @@
 </head>
 <body>
   <canvas id="scene" aria-label="Дерево"></canvas>
+  <svg id="flat" class="flat" aria-label="Схема дерева" hidden></svg>
   <div id="tooltip" class="tooltip" hidden></div>
+  <div id="zoom" class="zoom" hidden>
+    <button id="zoom-in" type="button" title="Приблизить" aria-label="Приблизить">+</button>
+    <button id="zoom-out" type="button" title="Отдалить" aria-label="Отдалить">−</button>
+    <button id="zoom-fit" type="button" title="Показать всё дерево">Вписать</button>
+  </div>
 
   <button id="panel-toggle" class="panel-toggle" type="button" aria-controls="panel" aria-expanded="true">Ветки</button>
 
@@ -18,10 +24,15 @@
       <p class="muted">Кликните по ветке, чтобы выбрать её, и добавьте к ней новую.</p>
     </header>
 
+    <div class="segmented" role="radiogroup" aria-label="Вид дерева">
+      <label><input type="radio" name="view" value="living" checked><span>Живое</span></label>
+      <label><input type="radio" name="view" value="flat"><span>Схема 2D</span></label>
+    </div>
+
     <section class="panel__section switches">
       <label class="switch"><input id="leaves-toggle" type="checkbox" checked><span></span>Листья</label>
-      <label class="switch"><input id="labels-toggle" type="checkbox"><span></span>Подписи</label>
-      <label class="switch"><input id="wind-toggle" type="checkbox" checked><span></span>Ветер</label>
+      <label class="switch" data-view="living"><input id="labels-toggle" type="checkbox"><span></span>Подписи</label>
+      <label class="switch" data-view="living"><input id="wind-toggle" type="checkbox" checked><span></span>Ветер</label>
     </section>
 
     <section class="panel__section">
