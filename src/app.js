@@ -661,7 +661,6 @@ function resize() {
 
 function frame() {
   requestAnimationFrame(frame);
-loadPhotos({ prune: true });
   if (state.view === 'editor') return;
   if (state.view === 'flat') {
     flat.frame(treeArea());
@@ -700,4 +699,5 @@ editor.render(state.fam, state.selectedId);
 applyView();
 resize();
 renderPanel();
+loadPhotos({ prune: true });
 requestAnimationFrame(frame);
